@@ -22,6 +22,7 @@ class Adoology_Incomplete_Orders {
         add_action('rest_api_init', array(__CLASS__, 'register_routes'));
         add_action('wp_enqueue_scripts', array(__CLASS__, 'enqueue_checkout_tracker'));
         add_action('woocommerce_checkout_order_processed', array(__CLASS__, 'checkout_completed'), 30, 3);
+        add_action('woocommerce_store_api_cart_update_customer_from_request', array(__CLASS__, 'store_api_cart_updated'), 20, 2);
         add_action('woocommerce_store_api_checkout_update_order_from_request', array(__CLASS__, 'store_api_capture_identity'), 20, 2);
         add_action('woocommerce_store_api_checkout_order_processed', array(__CLASS__, 'store_api_checkout_completed'), 30, 1);
         add_action(self::LIFECYCLE_HOOK, array(__CLASS__, 'advance_lifecycle'));
@@ -232,6 +233,18 @@ class Adoology_Incomplete_Orders {
                 $row['form_stage'] = $existing['form_stage'];
             }
             $wpdb->update($table, $row, array('id' => (int) $existing['id']));
+            if ($tracking && self::customer_changed((string) ($existing['customer_data'] ?? ''), $checkout_id, $customer)) {
+                Adoology_Events::enqueue('checkout.updated', (string) ($data['anonymous_id'] ?? self::anonymous_id()), $row['session_id'], array(
+                    'checkout_id' => $checkout_id,
+                    'flow'        => $row['flow'],
+                    'product_id'  => $row['product_id'],
+                    'quantity'    => $row['quantity'],
+                    'value_minor' => $row['value_minor'],
+                    'currency'    => $row['currency'],
+                    'form_stage'  => $row['form_stage'],
+                    'customer'    => self::public_customer($customer),
+                ), self::request_context());
+            }
             return true;
         }
 
@@ -307,6 +320,55 @@ class Adoology_Incomplete_Orders {
     }
 
     /**
+     * Capture billing details saved by the WooCommerce Blocks cart API.
+     *
+     * @param WC_Customer    $customer Customer updated by the Store API.
+     * @param WP_REST_Request $request Store API request.
+     */
+    public static function store_api_cart_updated($customer, $request) {
+        if (Adoology_Options::get('adoology_tracking_enabled', 'no') !== 'yes' || !$customer instanceof WC_Customer) {
+            return;
+        }
+
+        $identity = self::identity();
+        $cart     = function_exists('WC') ? WC()->cart : null;
+        $items    = array();
+        if ($cart) {
+            foreach ($cart->get_cart() as $item) {
+                $items[] = array(
+                    'product_id'   => (int) $item['product_id'],
+                    'variation_id' => (int) $item['variation_id'],
+                    'quantity'     => (int) $item['quantity'],
+                );
+            }
+        }
+        $primary_item = $items[0] ?? array();
+
+        self::store_snapshot($identity['checkout_id'], array(
+            'anonymous_id' => $identity['anonymous_id'],
+            'session_id'   => $identity['session_id'],
+            'flow'         => 'checkout',
+            'product_id'   => $primary_item['product_id'] ?? 0,
+            'variation_id' => $primary_item['variation_id'] ?? 0,
+            'quantity'     => $primary_item['quantity'] ?? 1,
+            'value_minor'  => $cart ? self::to_minor($cart->get_total('edit')) : 0,
+            'currency'     => get_woocommerce_currency(),
+            'customer'     => array(
+                'name'     => trim($customer->get_billing_first_name() . ' ' . $customer->get_billing_last_name()),
+                'phone'    => $customer->get_billing_phone(),
+                'email'    => $customer->get_billing_email(),
+                'address'  => trim($customer->get_billing_address_1() . ' ' . $customer->get_billing_address_2()),
+                'city'     => $customer->get_billing_city(),
+                'postcode' => $customer->get_billing_postcode(),
+                'country'  => $customer->get_billing_country(),
+            ),
+            'landing_page' => wp_get_referer() ?: wc_get_checkout_url(),
+            'form_stage'   => 'details',
+            'items'        => $items,
+        ));
+    }
+
+    /**
      * Convert or recover a tracked checkout.
      *
      * @param string        $checkout_id Checkout UUID.
@@ -363,7 +425,7 @@ class Adoology_Incomplete_Orders {
             gmdate('Y-m-d H:i:s', time() - 15 * MINUTE_IN_SECONDS)
         ));
         $rows    = $wpdb->get_results($wpdb->prepare(
-            "SELECT id, checkout_id, session_id, flow, product_id, quantity, value_minor, currency, form_stage FROM {$table} WHERE status = 'started' AND last_activity_at < %s LIMIT 100",
+            "SELECT id, checkout_id, session_id, flow, product_id, quantity, value_minor, currency, form_stage, customer_data FROM {$table} WHERE status = 'started' AND last_activity_at < %s LIMIT 100",
             gmdate('Y-m-d H:i:s', time() - $timeout)
         ), ARRAY_A);
         foreach ($rows as $row) {
@@ -377,6 +439,7 @@ class Adoology_Incomplete_Orders {
                     'value_minor' => (int) $row['value_minor'],
                     'currency'    => $row['currency'],
                     'form_stage'  => $row['form_stage'],
+                    'customer'    => self::contact_payload((string) ($row['customer_data'] ?? ''), $row['checkout_id']),
                 ));
             }
         }
@@ -619,6 +682,69 @@ class Adoology_Incomplete_Orders {
             }
         }
         return self::anonymous_id();
+    }
+
+    /**
+     * Minimized contact snapshot for backend recovery workflows.
+     *
+     * @param string $payload    Encrypted customer data.
+     * @param string $checkout_id Checkout UUID.
+     * @return array
+     */
+    private static function contact_payload($payload, $checkout_id) {
+        if ($payload === '') {
+            return array();
+        }
+        $decrypted = Adoology_Crypto::decrypt($payload, 'adoology_checkout_' . $checkout_id);
+        $data      = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
+        if (!is_array($data)) {
+            return array();
+        }
+        $contact = array();
+        foreach (array('name', 'phone', 'email', 'address', 'city', 'postcode', 'country') as $field) {
+            if (isset($data[$field]) && is_string($data[$field]) && $data[$field] !== '') {
+                $contact[$field] = mb_substr($data[$field], 0, $field === 'address' ? 500 : 190);
+            }
+        }
+        return $contact;
+    }
+
+    /**
+     * Whether freshly captured contact details add usable recovery data.
+     *
+     * @param string $stored      Encrypted stored customer data.
+     * @param string $checkout_id Checkout UUID.
+     * @param array  $incoming    Sanitized incoming customer fields.
+     * @return bool
+     */
+    private static function customer_changed($stored, $checkout_id, $incoming) {
+        $previous = self::contact_payload($stored, $checkout_id);
+        $fresh    = self::public_customer($incoming);
+        if ($fresh === array()) {
+            return false;
+        }
+        foreach (array('name', 'phone', 'email') as $field) {
+            if (isset($fresh[$field]) && ($previous[$field] ?? '') !== $fresh[$field]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Public subset of sanitized customer fields safe for event payloads.
+     *
+     * @param array $customer Sanitized customer fields.
+     * @return array
+     */
+    private static function public_customer($customer) {
+        $contact = array();
+        foreach (array('name', 'phone', 'email', 'address', 'city', 'postcode', 'country') as $field) {
+            if (isset($customer[$field]) && is_string($customer[$field]) && $customer[$field] !== '') {
+                $contact[$field] = $customer[$field];
+            }
+        }
+        return $contact;
     }
 
     private static function sanitize_customer($customer) {

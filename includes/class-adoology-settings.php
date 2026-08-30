@@ -338,6 +338,15 @@ class Adoology_Settings {
                 'type'    => 'NUMERIC',
             )),
         ));
+        $last_sync           = $state['last_full_sync_at'] ?? null;
+        $last_sync_timestamp = is_string($last_sync) ? strtotime($last_sync) : false;
+        $last_sync_display   = false === $last_sync_timestamp
+            ? __('Not available', 'adoology-connector')
+            : sprintf(
+                __('%1$s at %2$s', 'adoology-connector'),
+                wp_date(get_option('date_format'), $last_sync_timestamp),
+                wp_date(get_option('time_format'), $last_sync_timestamp)
+            );
         $cards = array(
             __('Connection', 'adoology-connector')       => ucfirst((string) ($state['status'] ?? 'not connected')),
             __('Queued events', 'adoology-connector')    => $this->group_count($events, array('pending', 'retrying')),
@@ -346,7 +355,7 @@ class Adoology_Settings {
             __('Recovered orders', 'adoology-connector') => $this->group_count($incomplete, array('recovered')),
             __('Flagged orders', 'adoology-connector')   => is_object($risk_orders) && isset($risk_orders->total) ? (int) $risk_orders->total : 0,
             __('API errors', 'adoology-connector')       => (int) ($state['error_count'] ?? 0),
-            __('Last successful sync', 'adoology-connector') => (string) ($state['last_full_sync_at'] ?? __('Not available', 'adoology-connector')),
+            __('Last successful sync', 'adoology-connector') => $last_sync_display,
         );
         ?>
         <div class="wrap"><h1><?php esc_html_e('Adoology Dashboard', 'adoology-connector'); ?></h1>
@@ -391,21 +400,77 @@ class Adoology_Settings {
     }
 
     /**
-     * Render tracked incomplete orders.
+     * Render tracked incomplete orders (read-only; editing happens in Adoology).
      */
     public function render_incomplete_orders() {
         global $wpdb;
 
         $this->guard_page();
+        $detail_id = isset($_GET['detail']) ? absint($_GET['detail']) : 0;
+        if ($detail_id > 0) {
+            $this->render_incomplete_detail($detail_id);
+
+            return;
+        }
+
         $rows = $wpdb->get_results("SELECT * FROM " . Adoology_Database::incomplete_table() . ' ORDER BY updated_at DESC LIMIT 100', ARRAY_A);
         ?>
         <div class="wrap"><h1><?php esc_html_e('Incomplete Orders', 'adoology-connector'); ?></h1>
-            <p><?php esc_html_e('Checkout and landing-page starts are marked incomplete after the configured inactivity window. Recovery automation remains in Adoology.', 'adoology-connector'); ?></p>
-            <table class="widefat striped"><thead><tr><th><?php esc_html_e('Status', 'adoology-connector'); ?></th><th><?php esc_html_e('Flow', 'adoology-connector'); ?></th><th><?php esc_html_e('Customer', 'adoology-connector'); ?></th><th><?php esc_html_e('Product', 'adoology-connector'); ?></th><th><?php esc_html_e('Value', 'adoology-connector'); ?></th><th><?php esc_html_e('Stage', 'adoology-connector'); ?></th><th><?php esc_html_e('Last activity', 'adoology-connector'); ?></th><th><?php esc_html_e('Order', 'adoology-connector'); ?></th></tr></thead><tbody>
-            <?php if (!$rows) : ?><tr><td colspan="8"><?php esc_html_e('No tracked checkouts.', 'adoology-connector'); ?></td></tr><?php endif; ?>
+            <p><?php esc_html_e('Checkout and landing-page starts are marked incomplete after the configured inactivity window. Records are read-only here; contact, recovery, and order creation are managed in Adoology.', 'adoology-connector'); ?></p>
+            <table class="widefat striped"><thead><tr><th><?php esc_html_e('Status', 'adoology-connector'); ?></th><th><?php esc_html_e('Flow', 'adoology-connector'); ?></th><th><?php esc_html_e('Customer', 'adoology-connector'); ?></th><th><?php esc_html_e('Product', 'adoology-connector'); ?></th><th><?php esc_html_e('Value', 'adoology-connector'); ?></th><th><?php esc_html_e('Stage', 'adoology-connector'); ?></th><th><?php esc_html_e('Last activity', 'adoology-connector'); ?></th><th><?php esc_html_e('Order', 'adoology-connector'); ?></th><th></th></tr></thead><tbody>
+            <?php if (!$rows) : ?><tr><td colspan="9"><?php esc_html_e('No tracked checkouts.', 'adoology-connector'); ?></td></tr><?php endif; ?>
             <?php foreach ($rows as $row) : $customer = $this->checkout_customer($row); $product = wc_get_product((int) ($row['variation_id'] ?: $row['product_id'])); ?>
-                <tr><td><strong><?php echo esc_html(ucfirst($row['status'])); ?></strong></td><td><?php echo esc_html(str_replace('_', ' ', $row['flow'])); ?></td><td><?php echo esc_html(trim(($customer['name'] ?? '') . ' ' . ($customer['phone'] ?? '')) ?: __('Anonymous', 'adoology-connector')); ?></td><td><?php echo esc_html($product ? $product->get_name() : '#' . $row['product_id']); ?> × <?php echo esc_html((string) $row['quantity']); ?></td><td><?php echo wp_kses_post(wc_price(((int) $row['value_minor']) / pow(10, wc_get_price_decimals()), array('currency' => $row['currency']))); ?></td><td><?php echo esc_html($row['form_stage']); ?></td><td><?php echo esc_html($row['last_activity_at']); ?> UTC</td><td><?php if ($row['order_id']) : ?><a href="<?php echo esc_url($this->order_edit_url($row['order_id'])); ?>">#<?php echo esc_html((string) $row['order_id']); ?></a><?php else : ?>—<?php endif; ?></td></tr>
+                <tr><td><strong><?php echo esc_html(ucfirst($row['status'])); ?></strong></td><td><?php echo esc_html(str_replace('_', ' ', $row['flow'])); ?></td><td><?php echo esc_html(trim(($customer['name'] ?? '') . ' ' . ($customer['phone'] ?? '')) ?: __('Anonymous', 'adoology-connector')); ?></td><td><?php echo esc_html($product ? $product->get_name() : '#' . $row['product_id']); ?> × <?php echo esc_html((string) $row['quantity']); ?></td><td><?php echo wp_kses_post(wc_price(((int) $row['value_minor']) / pow(10, wc_get_price_decimals()), array('currency' => $row['currency']))); ?></td><td><?php echo esc_html($row['form_stage']); ?></td><td><?php echo esc_html($row['last_activity_at']); ?> UTC</td><td><?php if ($row['order_id']) : ?><a href="<?php echo esc_url($this->order_edit_url($row['order_id'])); ?>">#<?php echo esc_html((string) $row['order_id']); ?></a><?php else : ?>—<?php endif; ?></td><td><a href="<?php echo esc_url(add_query_arg(array('page' => 'adoology-incomplete', 'detail' => (int) $row['id']), admin_url('admin.php'))); ?>"><?php esc_html_e('View', 'adoology-connector'); ?></a></td></tr>
             <?php endforeach; ?></tbody></table>
+        </div>
+        <?php
+    }
+
+    /**
+     * Render one read-only incomplete checkout record.
+     *
+     * @param int $id Row ID.
+     */
+    private function render_incomplete_detail($id) {
+        global $wpdb;
+
+        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . Adoology_Database::incomplete_table() . ' WHERE id = %d', $id), ARRAY_A);
+        if (!$row) {
+            echo '<div class="wrap"><h1>' . esc_html__('Incomplete Orders', 'adoology-connector') . '</h1><div class="notice notice-error inline"><p>' . esc_html__('Record not found.', 'adoology-connector') . '</p></div><p><a class="button" href="' . esc_url(admin_url('admin.php?page=adoology-incomplete')) . '">' . esc_html__('Back to list', 'adoology-connector') . '</a></p></div>';
+
+            return;
+        }
+
+        $customer = $this->checkout_customer($row);
+        $product  = wc_get_product((int) ($row['variation_id'] ?: $row['product_id']));
+        $fields   = array(
+            __('Status', 'adoology-connector')        => esc_html(ucfirst($row['status'])),
+            __('Flow', 'adoology-connector')          => esc_html(str_replace('_', ' ', $row['flow'])),
+            __('Checkout ID', 'adoology-connector')   => esc_html($row['checkout_id']),
+            __('Stage', 'adoology-connector')         => esc_html($row['form_stage']),
+            __('Name', 'adoology-connector')          => esc_html(($customer['name'] ?? '') ?: __('Anonymous', 'adoology-connector')),
+            __('Phone', 'adoology-connector')         => esc_html((string) ($customer['phone'] ?? '')),
+            __('Email', 'adoology-connector')         => esc_html((string) ($customer['email'] ?? '')),
+            __('Address', 'adoology-connector')       => esc_html(trim(($customer['address'] ?? '') . ' ' . ($customer['city'] ?? '') . ' ' . ($customer['postcode'] ?? '') . ' ' . ($customer['country'] ?? ''))),
+            __('Product', 'adoology-connector')       => esc_html(($product ? $product->get_name() : '#' . $row['product_id']) . ' × ' . $row['quantity']),
+            __('Value', 'adoology-connector')         => wp_kses_post(wc_price(((int) $row['value_minor']) / pow(10, wc_get_price_decimals()), array('currency' => $row['currency']))),
+            __('Landing page', 'adoology-connector')  => esc_url((string) $row['landing_page']),
+            __('Last activity', 'adoology-connector') => esc_html($row['last_activity_at']) . ' UTC',
+            __('Created', 'adoology-connector')       => esc_html($row['created_at']) . ' UTC',
+            __('Expires', 'adoology-connector')       => esc_html($row['expires_at']) . ' UTC',
+        );
+        ?>
+        <div class="wrap"><h1><?php esc_html_e('Incomplete Order', 'adoology-connector'); ?></h1>
+            <p><?php esc_html_e('Read-only snapshot. Contact, recovery, and order creation are managed in Adoology.', 'adoology-connector'); ?></p>
+            <table class="form-table" role="presentation">
+                <?php foreach ($fields as $label => $value) : ?>
+                    <tr><th scope="row"><?php echo esc_html($label); ?></th><td><?php echo $value; ?></td></tr>
+                <?php endforeach; ?>
+                <?php if ((int) $row['order_id'] > 0) : ?>
+                    <tr><th scope="row"><?php esc_html_e('Order', 'adoology-connector'); ?></th><td><a href="<?php echo esc_url($this->order_edit_url($row['order_id'])); ?>">#<?php echo esc_html((string) $row['order_id']); ?></a></td></tr>
+                <?php endif; ?>
+            </table>
+            <p><a class="button" href="<?php echo esc_url(admin_url('admin.php?page=adoology-incomplete')); ?>"><?php esc_html_e('Back to list', 'adoology-connector'); ?></a></p>
         </div>
         <?php
     }
@@ -485,7 +550,8 @@ class Adoology_Settings {
         $rows = $wpdb->get_results("SELECT event_id, event_name, status, attempts, last_error, created_at, sent_at FROM " . Adoology_Database::events_table() . ' ORDER BY id DESC LIMIT 100', ARRAY_A);
         ?>
         <div class="wrap"><h1><?php esc_html_e('Adoology Logs', 'adoology-connector'); ?></h1><?php $this->render_action_notice(); ?>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>"><?php wp_nonce_field('adoology_retry_events'); ?><input type="hidden" name="action" value="adoology_retry_events" /><?php submit_button(__('Retry Failed Events', 'adoology-connector'), 'secondary', 'submit', false); ?></form>
+            <?php $this->admin_styles(); ?>
+            <form class="adoology-log-actions" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>"><?php wp_nonce_field('adoology_retry_events'); ?><input type="hidden" name="action" value="adoology_retry_events" /><?php submit_button(__('Retry Failed Events', 'adoology-connector'), 'secondary', 'submit', false); ?></form>
             <table class="widefat striped"><thead><tr><th><?php esc_html_e('Event', 'adoology-connector'); ?></th><th><?php esc_html_e('Status', 'adoology-connector'); ?></th><th><?php esc_html_e('Attempts', 'adoology-connector'); ?></th><th><?php esc_html_e('Error', 'adoology-connector'); ?></th><th><?php esc_html_e('Created', 'adoology-connector'); ?></th><th><?php esc_html_e('Sent', 'adoology-connector'); ?></th></tr></thead><tbody>
             <?php if (!$rows) : ?><tr><td colspan="6"><?php esc_html_e('No event deliveries.', 'adoology-connector'); ?></td></tr><?php endif; ?>
             <?php foreach ($rows as $row) : ?><tr><td><code><?php echo esc_html($row['event_name']); ?></code><br><small><?php echo esc_html($row['event_id']); ?></small></td><td><?php echo esc_html($row['status']); ?></td><td><?php echo esc_html((string) $row['attempts']); ?></td><td><?php echo esc_html((string) $row['last_error']); ?></td><td><?php echo esc_html($row['created_at']); ?> UTC</td><td><?php echo esc_html((string) $row['sent_at']); ?></td></tr><?php endforeach; ?>
@@ -534,7 +600,7 @@ class Adoology_Settings {
     }
 
     private function admin_styles() {
-        ?><style>.adoology-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;max-width:1100px;margin:20px 0}.adoology-card{padding:18px;border:1px solid #dcdcde;border-radius:10px;background:#fff}.adoology-card span{display:block;color:#646970;margin-bottom:12px}.adoology-card strong{display:block;font-size:24px;line-height:1.2}</style><?php
+        ?><style>.adoology-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;max-width:1100px;margin:20px 0}.adoology-card{padding:18px;border:1px solid #dcdcde;border-radius:10px;background:#fff}.adoology-card span{display:block;color:#646970;margin-bottom:12px}.adoology-card strong{display:block;font-size:24px;line-height:1.2}.adoology-log-actions{margin-bottom:16px}</style><?php
     }
 
     /**
