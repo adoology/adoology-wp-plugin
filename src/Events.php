@@ -1,8 +1,7 @@
 <?php
+
 /**
  * Durable Adoology event outbox.
- *
- * @package Adoology
  */
 
 namespace Adoology;
@@ -14,54 +13,58 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class Events {
-
+class Events
+{
     const PROCESS_HOOK = 'adoology_process_events';
+
     const CLEANUP_HOOK = 'adoology_cleanup_events';
+
     const MAX_ATTEMPTS = 8;
 
     /**
      * Register queue callbacks.
      */
-    public static function register() {
-        add_action(self::PROCESS_HOOK, array(__CLASS__, 'process'));
-        add_action(self::CLEANUP_HOOK, array(__CLASS__, 'cleanup'));
+    public static function register()
+    {
+        add_action(self::PROCESS_HOOK, [self::class, 'process']);
+        add_action(self::CLEANUP_HOOK, [self::class, 'cleanup']);
     }
 
     /**
      * Enqueue one generic Adoology event.
      *
-     * @param string $name          Event name.
-     * @param string $anonymous_id Anonymous browser identifier.
-     * @param string $session_id   Checkout/session identifier.
-     * @param array  $properties   Event properties.
-     * @param array  $context      Request context.
+     * @param  string  $name  Event name.
+     * @param  string  $anonymous_id  Anonymous browser identifier.
+     * @param  string  $session_id  Checkout/session identifier.
+     * @param  array  $properties  Event properties.
+     * @param  array  $context  Request context.
      * @return string|WP_Error Event ULID or error.
      */
-    public static function enqueue($name, $anonymous_id, $session_id, $properties = array(), $context = array()) {
+    public static function enqueue($name, $anonymous_id, $session_id, $properties = [], $context = [])
+    {
         global $wpdb;
 
-        $name          = sanitize_key(str_replace('.', '_', (string) $name));
-        $name          = str_replace('_', '.', $name);
-        $anonymous_id  = substr(sanitize_text_field((string) $anonymous_id), 0, 128);
-        $session_id    = substr(sanitize_text_field((string) $session_id), 0, 128);
+        $name = sanitize_key(str_replace('.', '_', (string) $name));
+        $name = str_replace('_', '.', $name);
+        $anonymous_id = substr(sanitize_text_field((string) $anonymous_id), 0, 128);
+        $session_id = substr(sanitize_text_field((string) $session_id), 0, 128);
         $connection_id = Connection::connection_id();
         if ($name === '' || $anonymous_id === '') {
             return new WP_Error('adoology_invalid_event', __('Event name and anonymous identifier are required.', 'adoology-connector'));
         }
 
         $event_id = self::ulid();
-        $event    = array(
-            'id'                    => $event_id,
-            'name'                  => substr($name, 0, 120),
-            'anonymous_id'          => $anonymous_id,
-            'session_id'            => $session_id !== '' ? $session_id : null,
+        $event = [
+            'id' => $event_id,
+            'name' => substr($name, 0, 120),
+            'anonymous_id' => $anonymous_id,
+            'session_id' => $session_id !== '' ? $session_id : null,
             'channel_connection_id' => $connection_id !== '' ? $connection_id : null,
-            'properties'            => self::sanitize_value($properties, 0),
-            'context'               => self::sanitize_value($context, 0),
-            'source'                => 'api',
-            'occurred_at'           => gmdate('c'),
-        );
+            'properties' => self::sanitize_value($properties, 0),
+            'context' => self::sanitize_value($context, 0),
+            'source' => 'api',
+            'occurred_at' => gmdate('c'),
+        ];
         $json = wp_json_encode($event);
         if (!is_string($json) || strlen($json) > 65535) {
             return new WP_Error('adoology_event_too_large', __('Event payload is too large.', 'adoology-connector'));
@@ -72,34 +75,36 @@ class Events {
             return $encrypted;
         }
 
-        $now      = gmdate('Y-m-d H:i:s');
+        $now = gmdate('Y-m-d H:i:s');
         $inserted = $wpdb->insert(
             Database::events_table(),
-            array(
-                'event_id'      => $event_id,
-                'event_name'    => $event['name'],
-                'anonymous_id'  => $anonymous_id,
-                'payload'       => $encrypted,
-                'status'        => 'pending',
-                'attempts'      => 0,
-                'available_at'  => $now,
-                'created_at'    => $now,
-                'updated_at'    => $now,
-            ),
-            array('%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s')
+            [
+                'event_id' => $event_id,
+                'event_name' => $event['name'],
+                'anonymous_id' => $anonymous_id,
+                'payload' => $encrypted,
+                'status' => 'pending',
+                'attempts' => 0,
+                'available_at' => $now,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            ['%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s']
         );
         if (!$inserted) {
             return new WP_Error('adoology_event_store_failed', __('Could not queue the Adoology event.', 'adoology-connector'));
         }
 
         self::schedule_processing();
+
         return $event_id;
     }
 
     /**
      * Deliver one batch to Adoology.
      */
-    public static function process() {
+    public static function process()
+    {
         global $wpdb;
 
         if (!Connection::is_connected() || !Crypto::has_secret('adoology_api_token')) {
@@ -107,7 +112,7 @@ class Events {
         }
 
         $table = Database::events_table();
-        $now   = gmdate('Y-m-d H:i:s');
+        $now = gmdate('Y-m-d H:i:s');
         $wpdb->query($wpdb->prepare(
             "UPDATE {$table} SET status = 'retrying', lease_token = NULL, lease_expires_at = NULL, available_at = %s, updated_at = %s WHERE status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < %s)",
             $now,
@@ -124,9 +129,9 @@ class Events {
 
         $lease_token = wp_generate_uuid4();
         $placeholders = implode(',', array_fill(0, count($candidate_ids), '%d'));
-        $claim_query  = $wpdb->prepare(
+        $claim_query = $wpdb->prepare(
             "UPDATE {$table} SET status = 'processing', lease_token = %s, lease_expires_at = %s, updated_at = %s WHERE id IN ({$placeholders}) AND status IN ('pending','retrying') AND available_at <= %s",
-            array_merge(array($lease_token, gmdate('Y-m-d H:i:s', time() + 5 * MINUTE_IN_SECONDS), $now), array_map('intval', $candidate_ids), array($now))
+            array_merge([$lease_token, gmdate('Y-m-d H:i:s', time() + 5 * MINUTE_IN_SECONDS), $now], array_map('intval', $candidate_ids), [$now])
         );
         $wpdb->query($claim_query);
         $rows = $wpdb->get_results($wpdb->prepare(
@@ -137,17 +142,18 @@ class Events {
             return;
         }
 
-        $events = array();
-        $ids    = array();
+        $events = [];
+        $ids = [];
         foreach ($rows as $row) {
             $decrypted = Crypto::decrypt((string) $row['payload'], 'adoology_event_' . $row['event_id']);
-            $decoded   = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
+            $decoded = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
             if (!is_array($decoded)) {
                 self::mark_failed((int) $row['id'], (int) $row['attempts'], 'Stored event cannot be decrypted.', $lease_token);
+
                 continue;
             }
             $events[] = $decoded;
-            $ids[]    = (int) $row['id'];
+            $ids[] = (int) $row['id'];
         }
         if (empty($events)) {
             return;
@@ -161,13 +167,14 @@ class Events {
                 }
             }
             self::schedule_processing(time() + 60);
+
             return;
         }
 
         $sent_placeholders = implode(',', array_fill(0, count($ids), '%d'));
-        $query             = $wpdb->prepare(
+        $query = $wpdb->prepare(
             "UPDATE {$table} SET status = 'sent', sent_at = %s, updated_at = %s, last_error = NULL, lease_token = NULL, lease_expires_at = NULL WHERE id IN ({$sent_placeholders}) AND status = 'processing' AND lease_token = %s",
-            array_merge(array($now, $now), $ids, array($lease_token))
+            array_merge([$now, $now], $ids, [$lease_token])
         );
         $wpdb->query($query);
         self::schedule_processing(time() + 1);
@@ -176,7 +183,8 @@ class Events {
     /**
      * Purge sent events and redact old failed payloads.
      */
-    public static function cleanup() {
+    public static function cleanup()
+    {
         global $wpdb;
 
         $table = Database::events_table();
@@ -199,64 +207,69 @@ class Events {
     /**
      * Queue processing through Action Scheduler or WP-Cron.
      *
-     * @param int|null $timestamp Optional run timestamp.
+     * @param  int|null  $timestamp  Optional run timestamp.
      */
-    public static function schedule_processing($timestamp = null) {
-        Scheduler::schedule_single($timestamp ?: time() + 1, self::PROCESS_HOOK, array('async'));
+    public static function schedule_processing($timestamp = null)
+    {
+        Scheduler::schedule_single($timestamp ?: time() + 1, self::PROCESS_HOOK, ['async']);
     }
 
     /**
      * Mark a failed attempt and apply bounded exponential backoff.
      *
-     * @param int    $id       Row ID.
-     * @param int    $attempts Prior attempts.
-     * @param string $error    Safe error.
-     * @param string $lease_token Worker lease.
+     * @param  int  $id  Row ID.
+     * @param  int  $attempts  Prior attempts.
+     * @param  string  $error  Safe error.
+     * @param  string  $lease_token  Worker lease.
      */
-    private static function mark_failed($id, $attempts, $error, $lease_token) {
+    private static function mark_failed($id, $attempts, $error, $lease_token)
+    {
         global $wpdb;
 
         $attempts++;
         $terminal = $attempts >= self::MAX_ATTEMPTS;
-        $delay    = min(DAY_IN_SECONDS, (int) pow(2, min($attempts, 10)) * 60);
+        $delay = min(DAY_IN_SECONDS, (int) 2 ** min($attempts, 10) * 60);
         $wpdb->update(
             Database::events_table(),
-            array(
-                'status'       => $terminal ? 'failed' : 'retrying',
-                'attempts'     => $attempts,
+            [
+                'status' => $terminal ? 'failed' : 'retrying',
+                'attempts' => $attempts,
                 'available_at' => gmdate('Y-m-d H:i:s', time() + $delay),
-                'last_error'   => substr(Logger::redact_string(sanitize_text_field($error)), 0, 1000),
-                'updated_at'   => gmdate('Y-m-d H:i:s'),
-                'lease_token'  => null,
+                'last_error' => substr(Logger::redact_string(sanitize_text_field($error)), 0, 1000),
+                'updated_at' => gmdate('Y-m-d H:i:s'),
+                'lease_token' => null,
                 'lease_expires_at' => null,
-            ),
-            array('id' => $id, 'status' => 'processing', 'lease_token' => $lease_token),
-            array('%s', '%d', '%s', '%s', '%s', '%s', '%s'),
-            array('%d', '%s', '%s')
+            ],
+            ['id' => $id, 'status' => 'processing', 'lease_token' => $lease_token],
+            ['%s', '%d', '%s', '%s', '%s', '%s', '%s'],
+            ['%d', '%s', '%s']
         );
     }
 
     /**
      * Recursively sanitize event data and cap depth/size.
      *
-     * @param mixed $value Value.
-     * @param int   $depth Current depth.
+     * @param  mixed  $value  Value.
+     * @param  int  $depth  Current depth.
      * @return mixed
      */
-    private static function sanitize_value($value, $depth) {
+    private static function sanitize_value($value, $depth)
+    {
         if ($depth > 4) {
             return null;
         }
         if (is_array($value)) {
-            $safe = array();
+            $safe = [];
             foreach (array_slice($value, 0, 50, true) as $key => $child) {
                 $safe[sanitize_key((string) $key)] = self::sanitize_value($child, $depth + 1);
             }
+
             return $safe;
         }
         if (is_bool($value) || is_int($value) || is_float($value) || $value === null) {
             return $value;
         }
+
         return substr(sanitize_text_field((string) $value), 0, 1000);
     }
 
@@ -265,13 +278,14 @@ class Events {
      *
      * @return string
      */
-    private static function ulid() {
+    private static function ulid()
+    {
         $alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-        $time     = (int) floor(microtime(true) * 1000);
-        $output   = '';
+        $time = (int) floor(microtime(true) * 1000);
+        $output = '';
         for ($index = 0; $index < 10; $index++) {
             $output = $alphabet[$time % 32] . $output;
-            $time   = (int) floor($time / 32);
+            $time = (int) floor($time / 32);
         }
         try {
             $bytes = random_bytes(10);
@@ -285,6 +299,7 @@ class Events {
         for ($index = 0; $index < 16; $index++) {
             $output .= $alphabet[bindec(substr($bits, $index * 5, 5))];
         }
+
         return $output;
     }
 }

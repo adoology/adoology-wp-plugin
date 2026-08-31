@@ -1,4 +1,7 @@
 <?php
+
+use Adoology\Plugin;
+
 /**
  * Plugin Name: Adoology for WooCommerce
  * Plugin URI: https://adoology.com
@@ -8,10 +11,7 @@
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * WC requires at least: 8.0
- *
- * @package Adoology
  */
-
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -32,13 +32,14 @@ if (!is_readable(ADOOLOGY_PLUGIN_DIR . 'vendor/autoload.php')) {
         esc_html_e('Adoology for WooCommerce is missing its Composer dependencies. Run "composer install" in the plugin directory.', 'adoology-connector');
         echo '</p></div>';
     });
+
     return;
 }
 
 require_once ADOOLOGY_PLUGIN_DIR . 'vendor/autoload.php';
 
-Adoology\Plugin::boot();
+Plugin::boot();
 
-register_activation_hook(__FILE__, array(Adoology\Plugin::class, 'activate'));
-register_deactivation_hook(__FILE__, array(Adoology\Plugin::class, 'deactivate'));
-add_filter('plugin_action_links_' . plugin_basename(__FILE__), array(Adoology\Plugin::class, 'action_links'));
+register_activation_hook(__FILE__, [Plugin::class, 'activate']);
+register_deactivation_hook(__FILE__, [Plugin::class, 'deactivate']);
+add_filter('plugin_action_links_' . plugin_basename(__FILE__), [Plugin::class, 'action_links']);

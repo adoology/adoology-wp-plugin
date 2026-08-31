@@ -1,8 +1,7 @@
 <?php
+
 /**
  * Action Scheduler with WP-Cron fallback.
- *
- * @package Adoology
  */
 
 namespace Adoology;
@@ -14,19 +13,20 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class Scheduler {
-
+class Scheduler
+{
     const GROUP = 'adoology-connector';
 
     /**
      * Schedule one unique action.
      *
-     * @param int    $timestamp Unix timestamp.
-     * @param string $hook      Hook.
-     * @param array  $args      Hook arguments.
+     * @param  int  $timestamp  Unix timestamp.
+     * @param  string  $hook  Hook.
+     * @param  array  $args  Hook arguments.
      * @return true|WP_Error
      */
-    public static function schedule_single($timestamp, $hook, $args = array()) {
+    public static function schedule_single($timestamp, $hook, $args = [])
+    {
         $timestamp = max(time() + 1, (int) $timestamp);
 
         if (self::has_scheduled($hook, $args)) {
@@ -40,7 +40,7 @@ class Scheduler {
                     return true;
                 }
             } catch (Throwable $throwable) {
-                Logger::log('warning', 'Action Scheduler rejected an Adoology action.', array('hook' => $hook));
+                Logger::log('warning', 'Action Scheduler rejected an Adoology action.', ['hook' => $hook]);
             }
         }
 
@@ -55,11 +55,12 @@ class Scheduler {
     /**
      * Test pending/running queues.
      *
-     * @param string $hook Hook.
-     * @param array  $args Hook arguments.
+     * @param  string  $hook  Hook.
+     * @param  array  $args  Hook arguments.
      * @return bool
      */
-    public static function has_scheduled($hook, $args = array()) {
+    public static function has_scheduled($hook, $args = [])
+    {
         if (function_exists('as_has_scheduled_action') && did_action('action_scheduler_init') && as_has_scheduled_action($hook, $args, self::GROUP)) {
             return true;
         }
@@ -70,10 +71,11 @@ class Scheduler {
     /**
      * Unschedule actions with exact arguments.
      *
-     * @param string $hook Hook.
-     * @param array  $args Hook arguments.
+     * @param  string  $hook  Hook.
+     * @param  array  $args  Hook arguments.
      */
-    public static function unschedule($hook, $args = array()) {
+    public static function unschedule($hook, $args = [])
+    {
         if (function_exists('as_unschedule_all_actions') && did_action('action_scheduler_init')) {
             as_unschedule_all_actions($hook, $args, self::GROUP);
         }
@@ -84,9 +86,10 @@ class Scheduler {
     /**
      * Unschedule every action for a plugin-owned hook.
      *
-     * @param string $hook Hook.
+     * @param  string  $hook  Hook.
      */
-    public static function unschedule_hook($hook) {
+    public static function unschedule_hook($hook)
+    {
         if (function_exists('as_unschedule_all_actions') && did_action('action_scheduler_init')) {
             as_unschedule_all_actions($hook);
         }
@@ -105,7 +108,7 @@ class Scheduler {
                 continue;
             }
             foreach ($hooks[$hook] as $event) {
-                $args = isset($event['args']) && is_array($event['args']) ? $event['args'] : array();
+                $args = isset($event['args']) && is_array($event['args']) ? $event['args'] : [];
                 wp_unschedule_event((int) $timestamp, $hook, $args);
             }
         }

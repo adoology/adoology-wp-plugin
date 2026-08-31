@@ -1,8 +1,6 @@
 <?php
 /**
  * Cart-independent landing-page WooCommerce order form.
- *
- * @package Adoology
  */
 
 namespace Adoology;
@@ -16,43 +14,46 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class OrderForm {
-
+class OrderForm
+{
     /**
      * Register shortcode, block, and submission handlers.
      */
-    public static function register() {
-        add_shortcode('adoology_order_form', array(__CLASS__, 'shortcode'));
-        add_action('admin_post_adoology_submit_order', array(__CLASS__, 'submit'));
-        add_action('admin_post_nopriv_adoology_submit_order', array(__CLASS__, 'submit'));
-        add_action('init', array(__CLASS__, 'register_block'));
-        add_action('enqueue_block_editor_assets', array(__CLASS__, 'editor_assets'));
+    public static function register()
+    {
+        add_shortcode('adoology_order_form', [self::class, 'shortcode']);
+        add_action('admin_post_adoology_submit_order', [self::class, 'submit']);
+        add_action('admin_post_nopriv_adoology_submit_order', [self::class, 'submit']);
+        add_action('init', [self::class, 'register_block']);
+        add_action('enqueue_block_editor_assets', [self::class, 'editor_assets']);
     }
 
     /**
      * Register dynamic block.
      */
-    public static function register_block() {
+    public static function register_block()
+    {
         if (function_exists('register_block_type')) {
-            register_block_type('adoology/order-form', array(
-                'api_version'     => 2,
-                'attributes'      => array(
-                    'productId' => array('type' => 'integer', 'default' => 0),
-                    'title'     => array('type' => 'string', 'default' => ''),
-                ),
-                'render_callback' => array(__CLASS__, 'render_block'),
-            ));
+            register_block_type('adoology/order-form', [
+                'api_version' => 2,
+                'attributes' => [
+                    'productId' => ['type' => 'integer', 'default' => 0],
+                    'title' => ['type' => 'string', 'default' => ''],
+                ],
+                'render_callback' => [self::class, 'render_block'],
+            ]);
         }
     }
 
     /**
      * Register block editor UI.
      */
-    public static function editor_assets() {
+    public static function editor_assets()
+    {
         wp_enqueue_script(
             'adoology-order-form-block',
             plugins_url('assets/js/order-form-block.js', ADOOLOGY_PLUGIN_FILE),
-            array('wp-blocks', 'wp-element', 'wp-components', 'wp-block-editor', 'wp-i18n'),
+            ['wp-blocks', 'wp-element', 'wp-components', 'wp-block-editor', 'wp-i18n'],
             ADOOLOGY_VERSION,
             true
         );
@@ -61,45 +62,47 @@ class OrderForm {
     /**
      * Render dynamic block.
      *
-     * @param array $attributes Block attributes.
+     * @param  array  $attributes  Block attributes.
      * @return string
      */
-    public static function render_block($attributes) {
-        return self::shortcode(array(
+    public static function render_block($attributes)
+    {
+        return self::shortcode([
             'product_id' => isset($attributes['productId']) ? (int) $attributes['productId'] : 0,
-            'title'      => isset($attributes['title']) ? $attributes['title'] : '',
-        ));
+            'title' => $attributes['title'] ?? '',
+        ]);
     }
 
     /**
      * Render order form shortcode.
      *
-     * @param array $attributes Shortcode attributes.
+     * @param  array  $attributes  Shortcode attributes.
      * @return string
      */
-    public static function shortcode($attributes) {
+    public static function shortcode($attributes)
+    {
         if (Options::get('adoology_order_form_enabled', 'yes') !== 'yes') {
             return '';
         }
-        $attributes = shortcode_atts(array(
-            'product_id'      => 0,
-            'title'           => __('Order now', 'adoology-connector'),
+        $attributes = shortcode_atts([
+            'product_id' => 0,
+            'title' => __('Order now', 'adoology-connector'),
             'delivery_options' => 'standard:' . __('Standard delivery', 'adoology-connector') . ',pickup:' . __('Pickup', 'adoology-connector'),
-        ), $attributes, 'adoology_order_form');
+        ], $attributes, 'adoology_order_form');
         $product = wc_get_product((int) $attributes['product_id']);
         if (!$product || !$product->is_purchasable()) {
             return current_user_can('edit_posts') ? '<p>' . esc_html__('Select a purchasable WooCommerce product for this Adoology order form.', 'adoology-connector') . '</p>' : '';
         }
 
-        IncompleteOrders::enqueue_tracker('order_form', array(
-            'currency'    => get_woocommerce_currency(),
+        IncompleteOrders::enqueue_tracker('order_form', [
+            'currency' => get_woocommerce_currency(),
             'value_minor' => IncompleteOrders::to_minor($product->get_price()),
-            'items'       => array(array('product_id' => $product->get_id(), 'quantity' => 1)),
-        ));
+            'items' => [['product_id' => $product->get_id(), 'quantity' => 1]],
+        ]);
         $gateways = self::enabled_gateways();
         $delivery = self::delivery_options($attributes['delivery_options']);
         $error_token = isset($_GET['adoology_form_error']) ? sanitize_key(wp_unslash($_GET['adoology_form_error'])) : '';
-        $error       = preg_match('/^[a-f0-9]{32}$/', $error_token) ? get_transient('adoology_form_error_' . $error_token) : '';
+        $error = preg_match('/^[a-f0-9]{32}$/', $error_token) ? get_transient('adoology_form_error_' . $error_token) : '';
         if ($error_token !== '') {
             delete_transient('adoology_form_error_' . $error_token);
         }
@@ -149,45 +152,46 @@ class OrderForm {
     /**
      * Validate submission and create normal WooCommerce order.
      */
-    public static function submit() {
+    public static function submit()
+    {
         $referer = wp_get_referer() ?: home_url('/');
-        $nonce   = sanitize_text_field(wp_unslash($_POST['_adoology_nonce'] ?? ''));
+        $nonce = sanitize_text_field(wp_unslash($_POST['_adoology_nonce'] ?? ''));
         if (!wp_verify_nonce($nonce, 'adoology_submit_order') || Options::get('adoology_order_form_enabled', 'yes') !== 'yes') {
             self::fail(__('Order form security check failed.', 'adoology-connector'), $referer);
         }
 
-        $product_id  = absint($_POST['product_id'] ?? 0);
+        $product_id = absint($_POST['product_id'] ?? 0);
         $variation_id = absint($_POST['variation_id'] ?? 0);
-        $quantity    = max(1, min(99, absint($_POST['quantity'] ?? 1)));
-        $product     = $variation_id ? wc_get_product($variation_id) : wc_get_product($product_id);
-        $variation   = $variation_id && $product ? $product->get_variation_attributes() : array();
-        $valid_add   = apply_filters('woocommerce_add_to_cart_validation', true, $product_id, $quantity, $variation_id, $variation);
+        $quantity = max(1, min(99, absint($_POST['quantity'] ?? 1)));
+        $product = $variation_id ? wc_get_product($variation_id) : wc_get_product($product_id);
+        $variation = $variation_id && $product ? $product->get_variation_attributes() : [];
+        $valid_add = apply_filters('woocommerce_add_to_cart_validation', true, $product_id, $quantity, $variation_id, $variation);
         if (!$product || !$product->is_purchasable() || ($variation_id && (int) $product->get_parent_id() !== $product_id) || !$product->has_enough_stock($quantity) || ($product->is_sold_individually() && $quantity > 1) || !$valid_add) {
             self::fail(__('Selected product is unavailable.', 'adoology-connector'), $referer);
         }
 
-        $name    = sanitize_text_field(wp_unslash($_POST['adoology_name'] ?? ''));
-        $phone   = sanitize_text_field(wp_unslash($_POST['adoology_phone'] ?? ''));
-        $email   = sanitize_email(wp_unslash($_POST['adoology_email'] ?? ''));
+        $name = sanitize_text_field(wp_unslash($_POST['adoology_name'] ?? ''));
+        $phone = sanitize_text_field(wp_unslash($_POST['adoology_phone'] ?? ''));
+        $email = sanitize_email(wp_unslash($_POST['adoology_email'] ?? ''));
         $address = sanitize_text_field(wp_unslash($_POST['adoology_address'] ?? ''));
-        $city    = sanitize_text_field(wp_unslash($_POST['adoology_city'] ?? ''));
+        $city = sanitize_text_field(wp_unslash($_POST['adoology_city'] ?? ''));
         $postcode = sanitize_text_field(wp_unslash($_POST['adoology_postcode'] ?? ''));
         $country = sanitize_key(WC()->countries->get_base_country());
         if ($name === '' || $phone === '' || $address === '' || $city === '') {
             self::fail(__('Name, phone, address, and city are required.', 'adoology-connector'), $referer);
         }
 
-        $risk = Fraud::enabled() ? Fraud::evaluate(array(
-            'phone'    => $phone,
-            'email'    => $email,
+        $risk = Fraud::enabled() ? Fraud::evaluate([
+            'phone' => $phone,
+            'email' => $email,
             'honeypot' => sanitize_text_field(wp_unslash($_POST['adoology_website'] ?? '')),
-        ), array($product_id), true) : array('score' => 0, 'action' => 'allow', 'signals' => array());
+        ], [$product_id], true) : ['score' => 0, 'action' => 'allow', 'signals' => []];
         if ($risk['action'] === 'block') {
-            Events::enqueue('order.blocked', IncompleteOrders::anonymous_id(), IncompleteOrders::identity()['session_id'], array(
+            Events::enqueue('order.blocked', IncompleteOrders::anonymous_id(), IncompleteOrders::identity()['session_id'], [
                 'product_id' => $product_id,
                 'risk_score' => $risk['score'],
-                'signals'    => $risk['signals'],
-            ), IncompleteOrders::request_context());
+                'signals' => $risk['signals'],
+            ], IncompleteOrders::request_context());
             self::fail(__('We could not accept this order. Please contact the store for assistance.', 'adoology-connector'), $referer);
         }
 
@@ -195,20 +199,20 @@ class OrderForm {
         if (!preg_match('/^[a-f0-9-]{36}$/Di', $checkout_id)) {
             $checkout_id = self::fallback_checkout_id($nonce, $phone, $product_id);
         }
-        $identity    = IncompleteOrders::identity();
-        $snapshot = IncompleteOrders::store_snapshot($checkout_id, array(
+        $identity = IncompleteOrders::identity();
+        $snapshot = IncompleteOrders::store_snapshot($checkout_id, [
             'anonymous_id' => $identity['anonymous_id'],
-            'session_id'   => $identity['session_id'],
-            'flow'         => 'order_form',
-            'product_id'   => $product_id,
+            'session_id' => $identity['session_id'],
+            'flow' => 'order_form',
+            'product_id' => $product_id,
             'variation_id' => $variation_id,
-            'quantity'     => $quantity,
-            'value_minor'  => IncompleteOrders::to_minor((float) $product->get_price() * $quantity),
-            'currency'     => get_woocommerce_currency(),
+            'quantity' => $quantity,
+            'value_minor' => IncompleteOrders::to_minor((float) $product->get_price() * $quantity),
+            'currency' => get_woocommerce_currency(),
             'landing_page' => $referer,
-            'form_stage'   => 'submitted',
-            'customer'     => compact('name', 'phone', 'email', 'address', 'city', 'postcode', 'country'),
-        ));
+            'form_stage' => 'submitted',
+            'customer' => compact('name', 'phone', 'email', 'address', 'city', 'postcode', 'country'),
+        ]);
         if (is_wp_error($snapshot)) {
             self::fail(__('Could not prepare this order. Please try again.', 'adoology-connector'), $referer);
         }
@@ -224,10 +228,10 @@ class OrderForm {
             }
         }
 
-        $delivery_data      = sanitize_text_field(wp_unslash($_POST['delivery_config'] ?? ''));
+        $delivery_data = sanitize_text_field(wp_unslash($_POST['delivery_config'] ?? ''));
         $delivery_signature = sanitize_text_field(wp_unslash($_POST['delivery_signature'] ?? ''));
-        $delivery_options   = json_decode((string) base64_decode($delivery_data, true), true);
-        $delivery_option    = sanitize_key(wp_unslash($_POST['delivery_option'] ?? ''));
+        $delivery_options = json_decode((string) base64_decode($delivery_data, true), true);
+        $delivery_option = sanitize_key(wp_unslash($_POST['delivery_option'] ?? ''));
         if (!hash_equals(hash_hmac('sha256', $delivery_data, wp_salt('nonce')), $delivery_signature) || !is_array($delivery_options) || !isset($delivery_options[$delivery_option])) {
             IncompleteOrders::release_submission($checkout_id);
             self::fail(__('Selected delivery option is unavailable.', 'adoology-connector'), $referer);
@@ -235,11 +239,11 @@ class OrderForm {
 
         $order = null;
         try {
-            $order = wc_create_order(array('customer_id' => get_current_user_id()));
+            $order = wc_create_order(['customer_id' => get_current_user_id()]);
             $order->set_created_via('adoology-order-form');
             $order->add_product($product, $quantity);
-            list($first_name, $last_name) = self::split_name($name);
-            foreach (array('billing', 'shipping') as $type) {
+            [$first_name, $last_name] = self::split_name($name);
+            foreach (['billing', 'shipping'] as $type) {
                 $order->{'set_' . $type . '_first_name'}($first_name);
                 $order->{'set_' . $type . '_last_name'}($last_name);
                 $order->{'set_' . $type . '_address_1'}($address);
@@ -251,12 +255,12 @@ class OrderForm {
             $order->set_billing_email($email);
 
             $payment_method = sanitize_key(wp_unslash($_POST['payment_method'] ?? ''));
-            $gateways       = self::enabled_gateways();
+            $gateways = self::enabled_gateways();
             if (!isset($gateways[$payment_method])) {
                 throw new Exception(__('Selected payment method is unavailable.', 'adoology-connector'));
             }
             $order->update_meta_data('_adoology_preferred_payment_method', $payment_method);
-            $shipping = new WC_Order_Item_Shipping();
+            $shipping = new WC_Order_Item_Shipping;
             $shipping->set_method_title($delivery_options[$delivery_option]['label']);
             $shipping->set_method_id('adoology_' . $delivery_option);
             $shipping->set_total((float) $delivery_options[$delivery_option]['cost']);
@@ -292,12 +296,13 @@ class OrderForm {
                 $order->delete(true);
             }
             IncompleteOrders::release_submission($checkout_id);
-            Logger::log('error', 'Landing-page order creation failed.', array('error' => $throwable->getMessage()));
+            Logger::log('error', 'Landing-page order creation failed.', ['error' => $throwable->getMessage()]);
             self::fail(__('Could not create the order. Please review your details and try again.', 'adoology-connector'), $referer);
         }
     }
 
-    private static function variation_field($product) {
+    private static function variation_field($product)
+    {
         if (!$product->is_type('variable')) {
             return;
         }
@@ -312,26 +317,31 @@ class OrderForm {
         echo '</select></label></p>';
     }
 
-    private static function delivery_options($raw) {
-        $options = array();
+    private static function delivery_options($raw)
+    {
+        $options = [];
         foreach (explode(',', (string) $raw) as $entry) {
             $parts = array_map('trim', explode(':', $entry, 3));
             if (count($parts) >= 2 && sanitize_key($parts[0]) !== '') {
-                $options[sanitize_key($parts[0])] = array(
+                $options[sanitize_key($parts[0])] = [
                     'label' => sanitize_text_field($parts[1]),
-                    'cost'  => isset($parts[2]) ? max(0, (float) wc_format_decimal($parts[2])) : 0,
-                );
+                    'cost' => isset($parts[2]) ? max(0, (float) wc_format_decimal($parts[2])) : 0,
+                ];
             }
         }
-        return $options ?: array('standard' => array('label' => __('Standard delivery', 'adoology-connector'), 'cost' => 0));
+
+        return $options ?: ['standard' => ['label' => __('Standard delivery', 'adoology-connector'), 'cost' => 0]];
     }
 
-    private static function split_name($name) {
+    private static function split_name($name)
+    {
         $parts = preg_split('/\s+/', trim($name), 2);
-        return array($parts[0] ?? '', $parts[1] ?? '');
+
+        return [$parts[0] ?? '', $parts[1] ?? ''];
     }
 
-    private static function fail($message, $redirect) {
+    private static function fail($message, $redirect)
+    {
         try {
             $token = bin2hex(random_bytes(16));
         } catch (Exception $exception) {
@@ -342,8 +352,9 @@ class OrderForm {
         exit;
     }
 
-    private static function enabled_gateways() {
-        $enabled = array();
+    private static function enabled_gateways()
+    {
+        $enabled = [];
         if (!function_exists('WC') || !WC()->payment_gateways()) {
             return $enabled;
         }
@@ -352,16 +363,20 @@ class OrderForm {
                 $enabled[$gateway->id] = $gateway;
             }
         }
+
         return $enabled;
     }
 
-    private static function fallback_checkout_id($nonce, $phone, $product_id) {
+    private static function fallback_checkout_id($nonce, $phone, $product_id)
+    {
         $bucket = (int) floor(time() / (10 * MINUTE_IN_SECONDS));
-        $hash   = hash_hmac('sha256', $nonce . '|' . $phone . '|' . (int) $product_id . '|' . IncompleteOrders::client_ip() . '|' . $bucket, wp_salt('nonce'));
+        $hash = hash_hmac('sha256', $nonce . '|' . $phone . '|' . (int) $product_id . '|' . IncompleteOrders::client_ip() . '|' . $bucket, wp_salt('nonce'));
+
         return substr($hash, 0, 8) . '-' . substr($hash, 8, 4) . '-4' . substr($hash, 13, 3) . '-a' . substr($hash, 17, 3) . '-' . substr($hash, 20, 12);
     }
 
-    private static function styles() {
+    private static function styles()
+    {
         static $rendered = false;
         if ($rendered) {
             return;

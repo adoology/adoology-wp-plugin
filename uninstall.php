@@ -1,10 +1,8 @@
 <?php
+
 /**
  * Remove Adoology connection state and legacy local artifacts.
- *
- * @package Adoology
  */
-
 if (!defined('WP_UNINSTALL_PLUGIN')) {
     exit;
 }
@@ -20,11 +18,12 @@ use Adoology\ApiClient;
 /**
  * Uninstall plugin data for current site.
  */
-function adoology_uninstall_site() {
+function adoology_uninstall_site()
+{
     global $wpdb;
 
     $preserve_remote_state = false;
-    $connection_id         = (string) get_option('adoology_connection_id', '');
+    $connection_id = (string) get_option('adoology_connection_id', '');
     if (preg_match('/^[0-9A-HJKMNP-TV-Z]{26}$/Di', $connection_id)) {
         $remote_result = ApiClient::delete_connection(
             $connection_id,
@@ -34,7 +33,7 @@ function adoology_uninstall_site() {
         $preserve_remote_state = is_wp_error($remote_result) && ApiClient::error_status($remote_result) !== 404;
     }
 
-    foreach ((array) get_option('adoology_wc_webhook_ids', array()) as $webhook_id) {
+    foreach ((array) get_option('adoology_wc_webhook_ids', []) as $webhook_id) {
         $webhook_id = (int) $webhook_id;
         if ($webhook_id <= 0) {
             continue;
@@ -44,13 +43,14 @@ function adoology_uninstall_site() {
             if ($webhook && strpos((string) $webhook->get_name(), 'Adoology: ') === 0) {
                 $webhook->delete(true);
             }
+
             continue;
         }
 
         $table = $wpdb->prefix . 'wc_webhooks';
-        $name  = $wpdb->get_var($wpdb->prepare("SELECT name FROM {$table} WHERE webhook_id = %d", $webhook_id));
+        $name = $wpdb->get_var($wpdb->prepare("SELECT name FROM {$table} WHERE webhook_id = %d", $webhook_id));
         if (is_string($name) && strpos($name, 'Adoology: ') === 0) {
-            $wpdb->delete($table, array('webhook_id' => $webhook_id), array('%d'));
+            $wpdb->delete($table, ['webhook_id' => $webhook_id], ['%d']);
         }
     }
 
@@ -58,8 +58,8 @@ function adoology_uninstall_site() {
     if ($key_id > 0) {
         $wpdb->delete(
             $wpdb->prefix . 'woocommerce_api_keys',
-            array('key_id' => $key_id, 'description' => 'Adoology Connector'),
-            array('%d', '%s')
+            ['key_id' => $key_id, 'description' => 'Adoology Connector'],
+            ['%d', '%s']
         );
     }
 
@@ -69,13 +69,13 @@ function adoology_uninstall_site() {
     wp_clear_scheduled_hook('adoology_cleanup_events');
     wp_clear_scheduled_hook('adoology_incomplete_order_lifecycle');
 
-    $preserved = array(
+    $preserved = [
         'adoology_api_base_url',
         'adoology_api_token',
         'adoology_connection_id',
         'adoology_disconnect_idempotency_key',
-    );
-    $options = array(
+    ];
+    $options = [
         'adoology_api_base_url',
         'adoology_api_token',
         'adoology_product_auto_sync',
@@ -113,7 +113,7 @@ function adoology_uninstall_site() {
         'adoology_pending_revoke_connection_id',
         'adoology_pending_revoke_secret',
         'adoology_pending_revoke_created_at',
-    );
+    ];
 
     foreach ($options as $option) {
         if (!$preserve_remote_state || !in_array($option, $preserved, true)) {
@@ -126,7 +126,7 @@ function adoology_uninstall_site() {
 }
 
 if (is_multisite()) {
-    $site_ids = get_sites(array('fields' => 'ids', 'number' => 0));
+    $site_ids = get_sites(['fields' => 'ids', 'number' => 0]);
     foreach ($site_ids as $site_id) {
         switch_to_blog((int) $site_id);
         adoology_uninstall_site();

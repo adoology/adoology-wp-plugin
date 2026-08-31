@@ -1,10 +1,8 @@
 <?php
+
 /**
  * PHPUnit bootstrap.
- *
- * @package Adoology
  */
-
 if (!defined('ABSPATH')) {
     define('ABSPATH', __DIR__ . '/../');
 }

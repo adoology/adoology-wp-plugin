@@ -765,16 +765,16 @@ tests/                                 PHPUnit unit tests (Brain Monkey)
 
 ### Installation and tests
 
-Install dependencies and run the unit test suite:
+Install dependencies and run the full quality pipeline (Pint, Rector, PHPStan, PHPUnit):
 
 ```bash
 composer install
-composer test
+composer ci
 ```
 
-### Syntax checks
+Individual scripts: `composer format` (Pint), `composer refactor` (Rector), `composer lint` (Pint + Rector check), `composer types` (PHPStan with WordPress/WooCommerce stubs), `composer test` (PHPUnit), `composer fix` (Rector + Pint).
 
-Run PHP syntax validation:
+### Syntax checks
 
 ```bash
 composer lint

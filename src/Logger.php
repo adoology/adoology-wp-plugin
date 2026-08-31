@@ -1,8 +1,7 @@
 <?php
+
 /**
  * Redacting WooCommerce logger wrapper.
- *
- * @package Adoology
  */
 
 namespace Adoology;
@@ -11,54 +10,57 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class Logger {
-
+class Logger
+{
     const SOURCE = 'adoology-connector';
 
     /**
      * Write a sanitized log entry.
      *
-     * @param string $level   Log level.
-     * @param string $message Message.
-     * @param array  $context Context.
+     * @param  string  $level  Log level.
+     * @param  string  $message  Message.
+     * @param  array  $context  Context.
      */
-    public static function log($level, $message, $context = array()) {
+    public static function log($level, $message, $context = [])
+    {
         if (!function_exists('wc_get_logger')) {
             return;
         }
 
-        $allowed = array('debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency');
+        $allowed = ['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'];
         if (!in_array($level, $allowed, true)) {
             $level = 'info';
         }
 
         $safe_context = self::redact($context);
-        $suffix       = empty($safe_context) ? '' : ' ' . wp_json_encode($safe_context);
+        $suffix = empty($safe_context) ? '' : ' ' . wp_json_encode($safe_context);
 
         wc_get_logger()->log(
             $level,
             self::redact_string((string) $message) . $suffix,
-            array('source' => self::SOURCE)
+            ['source' => self::SOURCE]
         );
     }
 
     /**
      * Redact nested values whose keys or content can contain credentials.
      *
-     * @param mixed  $value Value.
-     * @param string $key   Parent key.
+     * @param  mixed  $value  Value.
+     * @param  string  $key  Parent key.
      * @return mixed
      */
-    public static function redact($value, $key = '') {
+    public static function redact($value, $key = '')
+    {
         if (preg_match('/(?:authorization|token|secret|signature|consumer_key|consumer_secret|api_key)/i', (string) $key)) {
             return '[redacted]';
         }
 
         if (is_array($value)) {
-            $safe = array();
+            $safe = [];
             foreach ($value as $child_key => $child_value) {
                 $safe[$child_key] = self::redact($child_value, (string) $child_key);
             }
+
             return $safe;
         }
 
@@ -72,10 +74,11 @@ class Logger {
     /**
      * Redact known key formats and credential-bearing text.
      *
-     * @param string $value Text.
+     * @param  string  $value  Text.
      * @return string
      */
-    public static function redact_string($value) {
+    public static function redact_string($value)
+    {
         $value = preg_replace('/Bearer\s+[^\s,;]+/i', 'Bearer [redacted]', (string) $value);
         $value = preg_replace('/\b(?:dc|ck|cs)_[A-Za-z0-9._~-]+\b/', '[redacted]', (string) $value);
         $value = preg_replace('/("?(?:token|secret|signature|consumer_key|consumer_secret|authorization|api_key)"?\s*[:=]\s*)[^,;\s]+/i', '$1[redacted]', (string) $value);

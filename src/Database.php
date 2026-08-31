@@ -1,8 +1,7 @@
 <?php
+
 /**
  * Plugin database installation and upgrades.
- *
- * @package Adoology
  */
 
 namespace Adoology;
@@ -11,20 +10,21 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class Database {
-
+class Database
+{
     const VERSION = '1.1.0';
 
     /**
      * Install or upgrade plugin tables.
      */
-    public static function install() {
+    public static function install()
+    {
         global $wpdb;
 
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         $charset_collate = $wpdb->get_charset_collate();
-        $events          = self::events_table();
-        $incomplete      = self::incomplete_table();
+        $events = self::events_table();
+        $incomplete = self::incomplete_table();
 
         dbDelta("CREATE TABLE {$events} (
             id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -81,7 +81,8 @@ class Database {
     /**
      * Upgrade when source schema changes.
      */
-    public static function maybe_upgrade() {
+    public static function maybe_upgrade()
+    {
         if ((string) Options::get('adoology_db_version', '') !== self::VERSION) {
             self::install();
         }
@@ -92,8 +93,10 @@ class Database {
      *
      * @return string
      */
-    public static function events_table() {
+    public static function events_table()
+    {
         global $wpdb;
+
         return $wpdb->prefix . 'adoology_events';
     }
 
@@ -102,8 +105,10 @@ class Database {
      *
      * @return string
      */
-    public static function incomplete_table() {
+    public static function incomplete_table()
+    {
         global $wpdb;
+
         return $wpdb->prefix . 'adoology_incomplete_orders';
     }
 }

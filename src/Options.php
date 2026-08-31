@@ -1,8 +1,7 @@
 <?php
+
 /**
  * Plugin option helpers.
- *
- * @package Adoology
  */
 
 namespace Adoology;
@@ -13,28 +12,30 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class Options {
-
+class Options
+{
     /**
      * Return an option.
      *
-     * @param string $name    Option name.
-     * @param mixed  $default Default value.
+     * @param  string  $name  Option name.
+     * @param  mixed  $default  Default value.
      * @return mixed
      */
-    public static function get($name, $default = false) {
+    public static function get($name, $default = false)
+    {
         return get_option($name, $default);
     }
 
     /**
      * Store an option without autoloading it.
      *
-     * @param string $name  Option name.
-     * @param mixed  $value Option value.
+     * @param  string  $name  Option name.
+     * @param  mixed  $value  Option value.
      * @return bool
      */
-    public static function update($name, $value) {
-        $missing = new stdClass();
+    public static function update($name, $value)
+    {
+        $missing = new stdClass;
 
         if (get_option($name, $missing) === $missing) {
             return add_option($name, $value, '', false);
@@ -46,40 +47,42 @@ class Options {
     /**
      * Delete an option.
      *
-     * @param string $name Option name.
+     * @param  string  $name  Option name.
      * @return bool
      */
-    public static function delete($name) {
+    public static function delete($name)
+    {
         return delete_option($name);
     }
 
     /**
      * Add defaults for one site.
      */
-    public static function install_defaults() {
-        $defaults = array(
-            'adoology_api_base_url'                 => 'https://api.adoology.com',
-            'adoology_product_auto_sync'             => 'yes',
-            'adoology_inventory_auto_sync'           => 'yes',
-            'adoology_channel_product_add_sync'      => 'yes',
-            'adoology_tracking_enabled'              => 'no',
-            'adoology_incomplete_timeout_minutes'    => 30,
-            'adoology_incomplete_expire_days'        => 7,
-            'adoology_fraud_enabled'                 => 'yes',
-            'adoology_fraud_rate_limit'              => 5,
-            'adoology_duplicate_window_minutes'      => 60,
-            'adoology_fraud_flag_threshold'          => 30,
-            'adoology_fraud_hold_threshold'          => 60,
-            'adoology_fraud_block_threshold'         => 90,
-            'adoology_order_form_enabled'            => 'yes',
-            'adoology_wc_webhook_ids'                => array(),
-            'adoology_connection_state'              => array(),
-            'adoology_webhook_retry_index'           => array(),
-            'adoology_plugin_version'                 => defined('ADOOLOGY_VERSION') ? ADOOLOGY_VERSION : '1.0.0',
-        );
+    public static function install_defaults()
+    {
+        $defaults = [
+            'adoology_api_base_url' => 'https://api.adoology.com',
+            'adoology_product_auto_sync' => 'yes',
+            'adoology_inventory_auto_sync' => 'yes',
+            'adoology_channel_product_add_sync' => 'yes',
+            'adoology_tracking_enabled' => 'no',
+            'adoology_incomplete_timeout_minutes' => 30,
+            'adoology_incomplete_expire_days' => 7,
+            'adoology_fraud_enabled' => 'yes',
+            'adoology_fraud_rate_limit' => 5,
+            'adoology_duplicate_window_minutes' => 60,
+            'adoology_fraud_flag_threshold' => 30,
+            'adoology_fraud_hold_threshold' => 60,
+            'adoology_fraud_block_threshold' => 90,
+            'adoology_order_form_enabled' => 'yes',
+            'adoology_wc_webhook_ids' => [],
+            'adoology_connection_state' => [],
+            'adoology_webhook_retry_index' => [],
+            'adoology_plugin_version' => defined('ADOOLOGY_VERSION') ? ADOOLOGY_VERSION : '1.0.0',
+        ];
 
         foreach ($defaults as $name => $value) {
-            $missing = new stdClass();
+            $missing = new stdClass;
             if (get_option($name, $missing) === $missing) {
                 add_option($name, $value, '', false);
             }
@@ -95,8 +98,9 @@ class Options {
      *
      * @return string[]
      */
-    public static function names() {
-        return array(
+    public static function names()
+    {
+        return [
             'adoology_api_base_url',
             'adoology_api_token',
             'adoology_product_auto_sync',
@@ -134,6 +138,6 @@ class Options {
             'adoology_pending_revoke_created_at',
             'adoology_inbound_secret',
             'adoology_stock_subscription_state',
-        );
+        ];
     }
 }

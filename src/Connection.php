@@ -1,8 +1,7 @@
 <?php
+
 /**
  * Adoology channel connection lifecycle.
- *
- * @package Adoology
  */
 
 namespace Adoology;
@@ -13,16 +12,18 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class Connection {
+class Connection
+{
+    const HEALTH_HOOK = 'adoology_connection_health_check';
 
-    const HEALTH_HOOK     = 'adoology_connection_health_check';
     const KEY_DESCRIPTION = 'Adoology Connector';
 
     /**
      * Register scheduled callbacks.
      */
-    public static function register() {
-        add_action(self::HEALTH_HOOK, array(__CLASS__, 'health_check'));
+    public static function register()
+    {
+        add_action(self::HEALTH_HOOK, [self::class, 'health_check']);
     }
 
     /**
@@ -30,7 +31,8 @@ class Connection {
      *
      * @return bool
      */
-    public static function is_connected() {
+    public static function is_connected()
+    {
         return self::connection_id() !== '';
     }
 
@@ -39,18 +41,21 @@ class Connection {
      *
      * @return string
      */
-    public static function connection_id() {
+    public static function connection_id()
+    {
         $connection_id = (string) Options::get('adoology_connection_id', '');
+
         return self::is_valid_connection_id($connection_id) ? $connection_id : '';
     }
 
     /**
      * Validate a backend ULID before using it in a URL.
      *
-     * @param string $connection_id Connection ID.
+     * @param  mixed  $connection_id  Connection ID.
      * @return bool
      */
-    public static function is_valid_connection_id($connection_id) {
+    public static function is_valid_connection_id($connection_id)
+    {
         return is_string($connection_id) && (bool) preg_match('/^[0-9A-HJKMNP-TV-Z]{26}$/Di', $connection_id);
     }
 
@@ -59,7 +64,8 @@ class Connection {
      *
      * @return string|true|WP_Error Authorization URL, true when already created, or error.
      */
-    public static function connect() {
+    public static function connect()
+    {
         if (!Crypto::is_available()) {
             return self::fail(new WP_Error('adoology_crypto_unavailable', __('OpenSSL AES-256-GCM support is required before connecting.', 'adoology-connector')));
         }
@@ -76,17 +82,17 @@ class Connection {
             return self::refresh_status();
         }
 
-        $idempotency     = Options::get('adoology_create_idempotency_key', array());
+        $idempotency = Options::get('adoology_create_idempotency_key', []);
         $idempotency_key = is_array($idempotency) && isset($idempotency['key'], $idempotency['created_at']) &&
             time() - (int) $idempotency['created_at'] < 9 * MINUTE_IN_SECONDS
             ? (string) $idempotency['key']
             : '';
         if ($idempotency_key === '') {
             $idempotency_key = ApiClient::new_idempotency_key();
-            Options::update('adoology_create_idempotency_key', array(
-                'key'        => $idempotency_key,
+            Options::update('adoology_create_idempotency_key', [
+                'key' => $idempotency_key,
                 'created_at' => time(),
-            ));
+            ]);
         }
 
         $created = ApiClient::create_connection(self::creation_payload(), $idempotency_key);
@@ -95,7 +101,7 @@ class Connection {
         }
 
         $connection_id = isset($created['data']['id']) ? (string) $created['data']['id'] : '';
-        $redirect_url  = isset($created['meta']['redirect_uri']) ? (string) $created['meta']['redirect_uri'] : '';
+        $redirect_url = isset($created['meta']['redirect_uri']) ? (string) $created['meta']['redirect_uri'] : '';
         $webhook_secret = isset($created['meta']['webhook_secret']) ? (string) $created['meta']['webhook_secret'] : '';
         if (!self::is_valid_connection_id($connection_id)) {
             return self::fail(new WP_Error('adoology_bad_connection_response', __('Adoology returned an invalid connection identifier.', 'adoology-connector')));
@@ -109,18 +115,21 @@ class Connection {
             } else {
                 Options::delete('adoology_create_idempotency_key');
             }
+
             return self::fail(new WP_Error('adoology_bad_authorization_url', __('Adoology returned an invalid WooCommerce authorization URL.', 'adoology-connector')));
         }
 
         $stored_secret = Crypto::set_secret('adoology_webhook_secret', $webhook_secret);
         if (is_wp_error($stored_secret)) {
             ApiClient::delete_connection($connection_id, ApiClient::new_idempotency_key());
+
             return self::fail($stored_secret);
         }
         Options::update('adoology_connection_id', $connection_id);
         self::store_backend_state($created, 'connecting');
         Options::delete('adoology_create_idempotency_key');
         Options::delete('adoology_last_error');
+
         return $redirect_url;
     }
 
@@ -129,7 +138,8 @@ class Connection {
      *
      * @return true|WP_Error
      */
-    public static function verify() {
+    public static function verify()
+    {
         return self::refresh_status();
     }
 
@@ -138,7 +148,8 @@ class Connection {
      *
      * @return true|WP_Error
      */
-    public static function sync_settings() {
+    public static function sync_settings()
+    {
         $connection_id = self::connection_id();
         if ($connection_id === '') {
             return true;
@@ -146,7 +157,7 @@ class Connection {
 
         $result = ApiClient::patch_connection(
             $connection_id,
-            array('settings' => self::settings_payload()),
+            ['settings' => self::settings_payload()],
             ApiClient::new_idempotency_key()
         );
         if (is_wp_error($result)) {
@@ -155,6 +166,7 @@ class Connection {
 
         self::store_backend_state($result);
         Options::delete('adoology_last_error');
+
         return true;
     }
 
@@ -163,7 +175,8 @@ class Connection {
      *
      * @return true|WP_Error
      */
-    public static function disconnect() {
+    public static function disconnect()
+    {
         $connection_id = self::connection_id();
         $webhook_secret = Crypto::get_secret('adoology_webhook_secret');
         if ($connection_id !== '' && !is_wp_error($webhook_secret) && $webhook_secret !== '') {
@@ -184,16 +197,18 @@ class Connection {
                 Options::delete('adoology_pending_revoke_connection_id');
                 Options::delete('adoology_pending_revoke_secret');
                 Options::delete('adoology_pending_revoke_created_at');
+
                 return self::fail($result);
             }
         }
 
         self::cleanup_local(true);
-        Options::update('adoology_connection_state', array(
-            'status'     => 'disconnected',
+        Options::update('adoology_connection_state', [
+            'status' => 'disconnected',
             'checked_at' => gmdate('Y-m-d H:i:s'),
-        ));
+        ]);
         Options::delete('adoology_last_error');
+
         return true;
     }
 
@@ -202,7 +217,8 @@ class Connection {
      *
      * @return true|WP_Error
      */
-    public static function refresh_status() {
+    public static function refresh_status()
+    {
         $connection_id = self::connection_id();
         if ($connection_id === '') {
             return self::fail(new WP_Error('adoology_not_connected', __('Connect the store before checking its status.', 'adoology-connector')));
@@ -212,23 +228,26 @@ class Connection {
         if (is_wp_error($result)) {
             if (ApiClient::error_status($result) === 404) {
                 self::cleanup_local(false);
-                Options::update('adoology_connection_state', array(
-                    'status'     => 'missing',
+                Options::update('adoology_connection_state', [
+                    'status' => 'missing',
                     'checked_at' => gmdate('Y-m-d H:i:s'),
-                ));
+                ]);
             }
+
             return self::fail($result);
         }
 
         self::store_backend_state($result);
         Options::delete('adoology_last_error');
+
         return true;
     }
 
     /**
      * Scheduled health callback.
      */
-    public static function health_check() {
+    public static function health_check()
+    {
         $pending_created_at = (int) Options::get('adoology_pending_revoke_created_at', 0);
         if ($pending_created_at > 0 && abs(time() - $pending_created_at) > DAY_IN_SECONDS) {
             Options::delete('adoology_pending_revoke_connection_id');
@@ -244,14 +263,15 @@ class Connection {
     /**
      * Remove plugin-owned local state and legacy scaffold artifacts.
      *
-     * @param bool $remove_api_token Also remove workspace token.
+     * @param  bool  $remove_api_token  Also remove workspace token.
      */
-    public static function cleanup_local($remove_api_token) {
+    public static function cleanup_local($remove_api_token)
+    {
         self::delete_legacy_webhooks();
         self::delete_legacy_api_key();
         Scheduler::unschedule_hook('adoology_webhook_retry');
 
-        $options = array(
+        $options = [
             'adoology_connection_id',
             'adoology_webhook_secret',
             'adoology_wc_webhook_ids',
@@ -267,7 +287,7 @@ class Connection {
             'adoology_webhooks_paused_by_deactivation',
             'adoology_inbound_secret',
             'adoology_stock_subscription_state',
-        );
+        ];
         if ($remove_api_token) {
             $options[] = 'adoology_api_token';
         }
@@ -282,23 +302,24 @@ class Connection {
      *
      * @return array
      */
-    private static function creation_payload() {
+    private static function creation_payload()
+    {
         $store_name = wp_specialchars_decode((string) get_bloginfo('name'), ENT_QUOTES);
         $store_name = function_exists('mb_substr') ? mb_substr($store_name, 0, 120) : substr($store_name, 0, 120);
 
-        return array(
-            'type'                 => 'woocommerce',
-            'name'                 => $store_name,
-            'base_url'             => untrailingslashit(home_url('/')),
-            'timezone'             => function_exists('wp_timezone_string') ? wp_timezone_string() : 'UTC',
+        return [
+            'type' => 'woocommerce',
+            'name' => $store_name,
+            'base_url' => untrailingslashit(home_url('/')),
+            'timezone' => function_exists('wp_timezone_string') ? wp_timezone_string() : 'UTC',
             'presentment_currency' => get_woocommerce_currency(),
-            'capabilities'         => array(
-                'weight_unit'    => (string) get_option('woocommerce_weight_unit', 'kg'),
-                'rest_api_url'   => untrailingslashit(rest_url('wc/v3')),
+            'capabilities' => [
+                'weight_unit' => (string) get_option('woocommerce_weight_unit', 'kg'),
+                'rest_api_url' => untrailingslashit(rest_url('wc/v3')),
                 'plugin_version' => ADOOLOGY_VERSION,
-            ),
-            'settings'             => self::settings_payload(),
-        );
+            ],
+            'settings' => self::settings_payload(),
+        ];
     }
 
     /**
@@ -306,35 +327,37 @@ class Connection {
      *
      * @return array
      */
-    private static function settings_payload() {
-        return array(
-            'product_auto_sync'        => Options::get('adoology_product_auto_sync', 'yes') === 'yes',
-            'inventory_auto_sync'      => Options::get('adoology_inventory_auto_sync', 'yes') === 'yes',
+    private static function settings_payload()
+    {
+        return [
+            'product_auto_sync' => Options::get('adoology_product_auto_sync', 'yes') === 'yes',
+            'inventory_auto_sync' => Options::get('adoology_inventory_auto_sync', 'yes') === 'yes',
             'channel_product_add_sync' => Options::get('adoology_channel_product_add_sync', 'yes') === 'yes',
-        );
+        ];
     }
 
     /**
      * Accept only this store's canonical Woo authorization endpoint.
      *
-     * @param string $url           Authorization URL.
-     * @param string $connection_id Expected callback state.
-     * @param string $webhook_secret One-time connection secret.
+     * @param  string  $url  Authorization URL.
+     * @param  string  $connection_id  Expected callback state.
+     * @param  string  $webhook_secret  One-time connection secret.
      * @return bool
      */
-    private static function is_safe_authorization_url($url, $connection_id, $webhook_secret) {
+    private static function is_safe_authorization_url($url, $connection_id, $webhook_secret)
+    {
         if ($url === '' || !wp_http_validate_url($url)) {
             return false;
         }
 
-        $actual   = wp_parse_url($url);
+        $actual = wp_parse_url($url);
         $expected = wp_parse_url(home_url('/wc-auth/v1/authorize'));
         if (!is_array($actual) || !is_array($expected)) {
             return false;
         }
 
-        foreach (array('scheme', 'host', 'port', 'path') as $part) {
-            $actual_value   = isset($actual[$part]) ? strtolower((string) $actual[$part]) : '';
+        foreach (['scheme', 'host', 'port', 'path'] as $part) {
+            $actual_value = isset($actual[$part]) ? strtolower((string) $actual[$part]) : '';
             $expected_value = isset($expected[$part]) ? strtolower((string) $expected[$part]) : '';
             if (!hash_equals($expected_value, $actual_value)) {
                 return false;
@@ -361,9 +384,9 @@ class Connection {
             return false;
         }
 
-        foreach (array('scheme', 'host', 'port') as $part) {
+        foreach (['scheme', 'host', 'port'] as $part) {
             $callback_value = isset($callback[$part]) ? strtolower((string) $callback[$part]) : '';
-            $api_value      = isset($api_base[$part]) ? strtolower((string) $api_base[$part]) : '';
+            $api_value = isset($api_base[$part]) ? strtolower((string) $api_base[$part]) : '';
             if (!hash_equals($api_value, $callback_value)) {
                 return false;
             }
@@ -375,21 +398,22 @@ class Connection {
     /**
      * Store allowlisted backend status and synchronization fields.
      *
-     * @param array  $response        API response.
-     * @param string $fallback_status Status when response omits one.
+     * @param  array  $response  API response.
+     * @param  string  $fallback_status  Status when response omits one.
      */
-    private static function store_backend_state($response, $fallback_status = 'unknown') {
-        $data       = isset($response['data']) && is_array($response['data']) ? $response['data'] : array();
+    private static function store_backend_state($response, $fallback_status = 'unknown')
+    {
+        $data = isset($response['data']) && is_array($response['data']) ? $response['data'] : [];
         $attributes = isset($data['attributes']) && is_array($data['attributes']) ? $data['attributes'] : $data;
-        $status     = isset($attributes['status']) && is_scalar($attributes['status'])
+        $status = isset($attributes['status']) && is_scalar($attributes['status'])
             ? sanitize_key((string) $attributes['status'])
             : $fallback_status;
-        $state      = array(
-            'status'     => $status,
+        $state = [
+            'status' => $status,
             'checked_at' => gmdate('Y-m-d H:i:s'),
-        );
+        ];
 
-        foreach (array('last_full_sync_at', 'last_incremental_sync_at', 'last_error_at') as $field) {
+        foreach (['last_full_sync_at', 'last_incremental_sync_at', 'last_error_at'] as $field) {
             if (isset($attributes[$field]) && is_string($attributes[$field])) {
                 $state[$field] = sanitize_text_field($attributes[$field]);
             }
@@ -407,8 +431,9 @@ class Connection {
     /**
      * Delete only webhook IDs recorded by older plugin versions.
      */
-    private static function delete_legacy_webhooks() {
-        foreach ((array) Options::get('adoology_wc_webhook_ids', array()) as $webhook_id) {
+    private static function delete_legacy_webhooks()
+    {
+        foreach ((array) Options::get('adoology_wc_webhook_ids', []) as $webhook_id) {
             $webhook = function_exists('wc_get_webhook') ? wc_get_webhook((int) $webhook_id) : null;
             if ($webhook && strpos((string) $webhook->get_name(), 'Adoology: ') === 0) {
                 $webhook->delete(true);
@@ -419,15 +444,16 @@ class Connection {
     /**
      * Delete only API key ID and description recorded by older plugin versions.
      */
-    private static function delete_legacy_api_key() {
+    private static function delete_legacy_api_key()
+    {
         global $wpdb;
 
         $key_id = (int) Options::get('adoology_wc_api_key_id', 0);
         if ($key_id > 0) {
             $wpdb->delete(
                 $wpdb->prefix . 'woocommerce_api_keys',
-                array('key_id' => $key_id, 'description' => self::KEY_DESCRIPTION),
-                array('%d', '%s')
+                ['key_id' => $key_id, 'description' => self::KEY_DESCRIPTION],
+                ['%d', '%s']
             );
         }
     }
@@ -435,15 +461,17 @@ class Connection {
     /**
      * Store a redacted operational error.
      *
-     * @param WP_Error $error Error.
+     * @param  WP_Error  $error  Error.
      * @return WP_Error
      */
-    private static function fail($error) {
+    private static function fail($error)
+    {
         $message = is_wp_error($error) ? $error->get_error_message() : __('Unknown Adoology connection error.', 'adoology-connector');
-        Options::update('adoology_last_error', array(
+        Options::update('adoology_last_error', [
             'message' => Logger::redact_string(sanitize_text_field($message)),
-            'time'    => gmdate('Y-m-d H:i:s'),
-        ));
+            'time' => gmdate('Y-m-d H:i:s'),
+        ]);
+
         return is_wp_error($error) ? $error : new WP_Error('adoology_connection_error', $message);
     }
 }
