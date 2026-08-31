@@ -2,14 +2,20 @@
 /**
  * Signed backend callback for WooCommerce API-key revocation.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use WP_Error;
+use WP_REST_Response;
+use WP_REST_Server;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Key_Revocation {
+class KeyRevocation {
 
     /**
      * Register signed revocation route.
@@ -49,19 +55,19 @@ class Adoology_Key_Revocation {
         $key_id        = absint($payload['key_id'] ?? 0);
         $consumer_key  = strtolower((string) ($payload['consumer_key_hash'] ?? ''));
         $timestamp     = (int) ($payload['timestamp'] ?? 0);
-        $local_id      = Adoology_Connection::connection_id();
-        $secret        = Adoology_Crypto::get_secret('adoology_webhook_secret');
+        $local_id      = Connection::connection_id();
+        $secret        = Crypto::get_secret('adoology_webhook_secret');
         if ($local_id === '') {
-            $local_id = (string) Adoology_Options::get('adoology_pending_revoke_connection_id', '');
-            $secret   = Adoology_Crypto::get_secret('adoology_pending_revoke_secret');
-            $pending_created_at = (int) Adoology_Options::get('adoology_pending_revoke_created_at', 0);
+            $local_id = (string) Options::get('adoology_pending_revoke_connection_id', '');
+            $secret   = Crypto::get_secret('adoology_pending_revoke_secret');
+            $pending_created_at = (int) Options::get('adoology_pending_revoke_created_at', 0);
             if ($pending_created_at <= 0 || abs(time() - $pending_created_at) > DAY_IN_SECONDS) {
                 self::clear_pending();
                 return new WP_Error('adoology_revoke_expired', __('Revocation request expired.', 'adoology-connector'), array('status' => 401));
             }
         }
 
-        if (!Adoology_Connection::is_valid_connection_id($connection_id) || !hash_equals($local_id, $connection_id) ||
+        if (!Connection::is_valid_connection_id($connection_id) || !hash_equals($local_id, $connection_id) ||
             $key_id <= 0 || !preg_match('/^[a-f0-9]{64}$/D', $consumer_key) || abs(time() - $timestamp) > 300 ||
             is_wp_error($secret) || $secret === '' ||
             !hash_equals(hash_hmac('sha256', $raw, $secret), $signature)) {
@@ -92,8 +98,8 @@ class Adoology_Key_Revocation {
      * Remove short-lived disconnect signing material.
      */
     private static function clear_pending() {
-        Adoology_Options::delete('adoology_pending_revoke_connection_id');
-        Adoology_Options::delete('adoology_pending_revoke_secret');
-        Adoology_Options::delete('adoology_pending_revoke_created_at');
+        Options::delete('adoology_pending_revoke_connection_id');
+        Options::delete('adoology_pending_revoke_secret');
+        Options::delete('adoology_pending_revoke_created_at');
     }
 }

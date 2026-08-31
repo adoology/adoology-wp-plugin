@@ -1,0 +1,43 @@
+{
+    "name": "adoology/woocommerce-connector",
+    "description": "Connect WooCommerce to Adoology for catalog, customer, order, and inventory synchronization.",
+    "type": "wordpress-plugin",
+    "license": "proprietary",
+    "homepage": "https://adoology.com",
+    "authors": [
+        {
+            "name": "Adoology",
+            "homepage": "https://adoology.com"
+        }
+    ],
+    "keywords": [
+        "wordpress",
+        "woocommerce",
+        "adoology"
+    ],
+    "require": {
+        "php": ">=7.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6",
+        "brain/monkey": "^2.6",
+        "yoast/phpunit-polyfills": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Adoology\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Adoology\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "phpunit",
+        "lint": "find src tests -name '*.php' -exec php -l {} +"
+    }
+}

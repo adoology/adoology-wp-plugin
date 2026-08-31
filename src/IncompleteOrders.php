@@ -2,14 +2,22 @@
 /**
  * Incomplete checkout tracking for native checkout and landing-page forms.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use WC_Customer;
+use WC_Order;
+use WP_Error;
+use WP_REST_Response;
+use WP_REST_Server;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Incomplete_Orders {
+class IncompleteOrders {
 
     const LIFECYCLE_HOOK = 'adoology_incomplete_order_lifecycle';
     const COOKIE_ANON    = 'adoology_anonymous_id';
@@ -51,7 +59,7 @@ class Adoology_Incomplete_Orders {
      * Load tracker on native checkout.
      */
     public static function enqueue_checkout_tracker() {
-        if (Adoology_Options::get('adoology_tracking_enabled', 'no') !== 'yes' || !function_exists('is_checkout') || !is_checkout() || is_order_received_page()) {
+        if (Options::get('adoology_tracking_enabled', 'no') !== 'yes' || !function_exists('is_checkout') || !is_checkout() || is_order_received_page()) {
             return;
         }
 
@@ -91,7 +99,7 @@ class Adoology_Incomplete_Orders {
             'tokenEndpoint' => esc_url_raw(rest_url('adoology/v1/checkout-token')),
             'flow'         => sanitize_key($flow),
             'landingPage'  => esc_url_raw(self::current_url()),
-            'trackingEnabled' => Adoology_Options::get('adoology_tracking_enabled', 'no') === 'yes',
+            'trackingEnabled' => Options::get('adoology_tracking_enabled', 'no') === 'yes',
             'data'         => $extra,
         ));
     }
@@ -103,7 +111,7 @@ class Adoology_Incomplete_Orders {
      * @return WP_REST_Response|WP_Error
      */
     public static function capture($request) {
-        if (Adoology_Options::get('adoology_tracking_enabled', 'no') !== 'yes') {
+        if (Options::get('adoology_tracking_enabled', 'no') !== 'yes') {
             return new WP_Error('adoology_tracking_disabled', __('Checkout tracking is disabled.', 'adoology-connector'), array('status' => 403));
         }
         if (!self::is_same_origin($request)) {
@@ -152,7 +160,7 @@ class Adoology_Incomplete_Orders {
      * @return WP_REST_Response|WP_Error
      */
     public static function issue_capture_token($request) {
-        $enabled = Adoology_Options::get('adoology_tracking_enabled', 'no') === 'yes' || Adoology_Options::get('adoology_order_form_enabled', 'yes') === 'yes';
+        $enabled = Options::get('adoology_tracking_enabled', 'no') === 'yes' || Options::get('adoology_order_form_enabled', 'yes') === 'yes';
         if (!$enabled || !self::is_same_origin($request) || !self::allow_capture_request()) {
             return new WP_Error('adoology_capture_forbidden', __('Checkout capture request was rejected.', 'adoology-connector'), array('status' => 403));
         }
@@ -185,22 +193,22 @@ class Adoology_Incomplete_Orders {
             return new WP_Error('adoology_checkout_invalid', __('Invalid checkout identifier.', 'adoology-connector'));
         }
 
-        $table       = Adoology_Database::incomplete_table();
+        $table       = Database::incomplete_table();
         $existing    = $wpdb->get_row($wpdb->prepare("SELECT id, status, form_stage FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
-        $tracking    = Adoology_Options::get('adoology_tracking_enabled', 'no') === 'yes';
+        $tracking    = Options::get('adoology_tracking_enabled', 'no') === 'yes';
         $customer    = $tracking ? self::sanitize_customer(isset($data['customer']) ? $data['customer'] : array()) : array();
         if ($tracking) {
             $customer['anonymous_id'] = substr(sanitize_text_field((string) ($data['anonymous_id'] ?? '')), 0, 128);
             $customer['items'] = self::sanitize_items(isset($data['items']) ? $data['items'] : array());
         }
         $json        = $tracking ? wp_json_encode($customer) : '';
-        $encrypted   = $json && $customer ? Adoology_Crypto::encrypt($json, 'adoology_checkout_' . $checkout_id) : '';
+        $encrypted   = $json && $customer ? Crypto::encrypt($json, 'adoology_checkout_' . $checkout_id) : '';
         if (is_wp_error($encrypted)) {
             return $encrypted;
         }
 
         $now     = gmdate('Y-m-d H:i:s');
-        $expires = gmdate('Y-m-d H:i:s', time() + max(1, (int) Adoology_Options::get('adoology_incomplete_expire_days', 7)) * DAY_IN_SECONDS);
+        $expires = gmdate('Y-m-d H:i:s', time() + max(1, (int) Options::get('adoology_incomplete_expire_days', 7)) * DAY_IN_SECONDS);
         $row     = array(
             'session_id'       => substr(sanitize_text_field((string) ($data['session_id'] ?? '')), 0, 128),
             'flow'             => in_array(($data['flow'] ?? ''), array('checkout', 'order_form'), true) ? $data['flow'] : 'checkout',
@@ -234,7 +242,7 @@ class Adoology_Incomplete_Orders {
             }
             $wpdb->update($table, $row, array('id' => (int) $existing['id']));
             if ($tracking && self::customer_changed((string) ($existing['customer_data'] ?? ''), $checkout_id, $customer)) {
-                Adoology_Events::enqueue('checkout.updated', (string) ($data['anonymous_id'] ?? self::anonymous_id()), $row['session_id'], array(
+                Events::enqueue('checkout.updated', (string) ($data['anonymous_id'] ?? self::anonymous_id()), $row['session_id'], array(
                     'checkout_id' => $checkout_id,
                     'flow'        => $row['flow'],
                     'product_id'  => $row['product_id'],
@@ -263,7 +271,7 @@ class Adoology_Incomplete_Orders {
         }
 
         if ($tracking) {
-            Adoology_Events::enqueue('checkout.started', (string) ($data['anonymous_id'] ?? self::anonymous_id()), $row['session_id'], array(
+            Events::enqueue('checkout.started', (string) ($data['anonymous_id'] ?? self::anonymous_id()), $row['session_id'], array(
             'checkout_id' => $checkout_id,
             'flow'        => $row['flow'],
             'product_id'  => $row['product_id'],
@@ -326,7 +334,7 @@ class Adoology_Incomplete_Orders {
      * @param WP_REST_Request $request Store API request.
      */
     public static function store_api_cart_updated($customer, $request) {
-        if (Adoology_Options::get('adoology_tracking_enabled', 'no') !== 'yes' || !$customer instanceof WC_Customer) {
+        if (Options::get('adoology_tracking_enabled', 'no') !== 'yes' || !$customer instanceof WC_Customer) {
             return;
         }
 
@@ -381,7 +389,7 @@ class Adoology_Incomplete_Orders {
         if (!self::is_uuid($checkout_id)) {
             return;
         }
-        $table = Adoology_Database::incomplete_table();
+        $table = Database::incomplete_table();
         $row   = $wpdb->get_row($wpdb->prepare("SELECT id, status, session_id FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
         if (!$row || in_array($row['status'], array('converted', 'recovered'), true)) {
             return;
@@ -401,8 +409,8 @@ class Adoology_Incomplete_Orders {
             $order->update_meta_data('_adoology_checkout_id', $checkout_id);
             $order->save_meta_data();
         }
-        if (Adoology_Options::get('adoology_tracking_enabled', 'no') === 'yes') {
-            Adoology_Events::enqueue('checkout.' . $status, self::anonymous_id(), (string) $row['session_id'], array(
+        if (Options::get('adoology_tracking_enabled', 'no') === 'yes') {
+            Events::enqueue('checkout.' . $status, self::anonymous_id(), (string) $row['session_id'], array(
                 'checkout_id' => $checkout_id,
                 'order_id'    => (int) $order_id,
                 'status'      => $status,
@@ -417,8 +425,8 @@ class Adoology_Incomplete_Orders {
     public static function advance_lifecycle() {
         global $wpdb;
 
-        $table   = Adoology_Database::incomplete_table();
-        $timeout = max(5, (int) Adoology_Options::get('adoology_incomplete_timeout_minutes', 30)) * MINUTE_IN_SECONDS;
+        $table   = Database::incomplete_table();
+        $timeout = max(5, (int) Options::get('adoology_incomplete_timeout_minutes', 30)) * MINUTE_IN_SECONDS;
         $wpdb->query($wpdb->prepare(
             "UPDATE {$table} SET status = CASE WHEN status = 'submitting_recovery' THEN 'incomplete' ELSE 'started' END, updated_at = %s WHERE status IN ('submitting','submitting_recovery') AND order_id = 0 AND updated_at < %s",
             gmdate('Y-m-d H:i:s'),
@@ -430,8 +438,8 @@ class Adoology_Incomplete_Orders {
         ), ARRAY_A);
         foreach ($rows as $row) {
             $updated = $wpdb->update($table, array('status' => 'incomplete', 'updated_at' => gmdate('Y-m-d H:i:s')), array('id' => (int) $row['id'], 'status' => 'started'));
-            if ($updated && Adoology_Options::get('adoology_tracking_enabled', 'no') === 'yes') {
-                Adoology_Events::enqueue('checkout.incomplete', self::anonymous_for_checkout($row['checkout_id']), $row['session_id'], array(
+            if ($updated && Options::get('adoology_tracking_enabled', 'no') === 'yes') {
+                Events::enqueue('checkout.incomplete', self::anonymous_for_checkout($row['checkout_id']), $row['session_id'], array(
                     'checkout_id' => $row['checkout_id'],
                     'flow'        => $row['flow'],
                     'product_id'  => (int) $row['product_id'],
@@ -449,7 +457,7 @@ class Adoology_Incomplete_Orders {
             gmdate('Y-m-d H:i:s'),
             gmdate('Y-m-d H:i:s')
         ));
-        $retention = max(1, (int) Adoology_Options::get('adoology_incomplete_expire_days', 7)) * DAY_IN_SECONDS;
+        $retention = max(1, (int) Options::get('adoology_incomplete_expire_days', 7)) * DAY_IN_SECONDS;
         $wpdb->query($wpdb->prepare(
             "UPDATE {$table} SET customer_data = '', updated_at = %s WHERE status IN ('converted','recovered','expired') AND customer_data <> '' AND updated_at < %s",
             gmdate('Y-m-d H:i:s'),
@@ -466,7 +474,7 @@ class Adoology_Incomplete_Orders {
     public static function claim_submission($checkout_id) {
         global $wpdb;
 
-        $table = Adoology_Database::incomplete_table();
+        $table = Database::incomplete_table();
         $row   = $wpdb->get_row($wpdb->prepare("SELECT id, status, order_id FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
         if (!$row) {
             return new WP_Error('adoology_checkout_missing', __('Checkout could not be prepared.', 'adoology-connector'));
@@ -490,7 +498,7 @@ class Adoology_Incomplete_Orders {
     public static function release_submission($checkout_id) {
         global $wpdb;
 
-        $table = Adoology_Database::incomplete_table();
+        $table = Database::incomplete_table();
         $wpdb->query($wpdb->prepare(
             "UPDATE {$table} SET status = CASE WHEN status = 'submitting_recovery' THEN 'incomplete' ELSE 'started' END, updated_at = %s WHERE checkout_id = %s AND status IN ('submitting','submitting_recovery') AND order_id = 0",
             gmdate('Y-m-d H:i:s'),
@@ -658,9 +666,9 @@ class Adoology_Incomplete_Orders {
         foreach ($matches['rows'] as $match) {
             $anonymous_id = (string) ($match['customer']['anonymous_id'] ?? '');
             if ($anonymous_id !== '') {
-                $wpdb->delete(Adoology_Database::events_table(), array('anonymous_id' => $anonymous_id), array('%s'));
+                $wpdb->delete(Database::events_table(), array('anonymous_id' => $anonymous_id), array('%s'));
             }
-            $wpdb->delete(Adoology_Database::incomplete_table(), array('id' => (int) $match['row']['id']), array('%d'));
+            $wpdb->delete(Database::incomplete_table(), array('id' => (int) $match['row']['id']), array('%d'));
             $removed = true;
         }
         return array(
@@ -673,9 +681,9 @@ class Adoology_Incomplete_Orders {
 
     private static function anonymous_for_checkout($checkout_id) {
         global $wpdb;
-        $payload = $wpdb->get_var($wpdb->prepare("SELECT customer_data FROM " . Adoology_Database::incomplete_table() . " WHERE checkout_id = %s", $checkout_id));
+        $payload = $wpdb->get_var($wpdb->prepare("SELECT customer_data FROM " . Database::incomplete_table() . " WHERE checkout_id = %s", $checkout_id));
         if ($payload) {
-            $decrypted = Adoology_Crypto::decrypt($payload, 'adoology_checkout_' . $checkout_id);
+            $decrypted = Crypto::decrypt($payload, 'adoology_checkout_' . $checkout_id);
             $data      = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
             if (is_array($data) && !empty($data['anonymous_id'])) {
                 return $data['anonymous_id'];
@@ -695,7 +703,7 @@ class Adoology_Incomplete_Orders {
         if ($payload === '') {
             return array();
         }
-        $decrypted = Adoology_Crypto::decrypt($payload, 'adoology_checkout_' . $checkout_id);
+        $decrypted = Crypto::decrypt($payload, 'adoology_checkout_' . $checkout_id);
         $data      = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
         if (!is_array($data)) {
             return array();
@@ -786,7 +794,7 @@ class Adoology_Incomplete_Orders {
             return false;
         }
         $global = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM " . Adoology_Database::incomplete_table() . " WHERE created_at >= %s",
+            "SELECT COUNT(*) FROM " . Database::incomplete_table() . " WHERE created_at >= %s",
             gmdate('Y-m-d H:i:s', time() - MINUTE_IN_SECONDS)
         ));
         if ($global >= 300) {
@@ -835,16 +843,16 @@ class Adoology_Incomplete_Orders {
 
         if ($limit > 0) {
             $rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT * FROM " . Adoology_Database::incomplete_table() . " WHERE customer_data <> '' ORDER BY id ASC LIMIT %d OFFSET %d",
+                "SELECT * FROM " . Database::incomplete_table() . " WHERE customer_data <> '' ORDER BY id ASC LIMIT %d OFFSET %d",
                 $limit,
                 max(0, ((int) $page - 1) * $limit)
             ), ARRAY_A);
         } else {
-            $rows = $wpdb->get_results("SELECT * FROM " . Adoology_Database::incomplete_table() . " WHERE customer_data <> '' ORDER BY id ASC", ARRAY_A);
+            $rows = $wpdb->get_results("SELECT * FROM " . Database::incomplete_table() . " WHERE customer_data <> '' ORDER BY id ASC", ARRAY_A);
         }
         $matches = array();
         foreach ($rows as $row) {
-            $decrypted = Adoology_Crypto::decrypt($row['customer_data'], 'adoology_checkout_' . $row['checkout_id']);
+            $decrypted = Crypto::decrypt($row['customer_data'], 'adoology_checkout_' . $row['checkout_id']);
             $customer  = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
             if (is_array($customer) && !empty($customer['email']) && strtolower($customer['email']) === strtolower($email)) {
                 $matches[] = array('row' => $row, 'customer' => $customer);
@@ -860,12 +868,12 @@ class Adoology_Incomplete_Orders {
             return array();
         }
         $rows   = $wpdb->get_results($wpdb->prepare(
-            "SELECT event_id, payload FROM " . Adoology_Database::events_table() . " WHERE anonymous_id = %s ORDER BY id ASC LIMIT 100",
+            "SELECT event_id, payload FROM " . Database::events_table() . " WHERE anonymous_id = %s ORDER BY id ASC LIMIT 100",
             $anonymous_id
         ), ARRAY_A);
         $events = array();
         foreach ($rows as $row) {
-            $decrypted = Adoology_Crypto::decrypt($row['payload'], 'adoology_event_' . $row['event_id']);
+            $decrypted = Crypto::decrypt($row['payload'], 'adoology_event_' . $row['event_id']);
             $decoded   = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
             if (is_array($decoded)) {
                 $events[] = $decoded;

@@ -2,14 +2,19 @@
 /**
  * Durable Adoology event outbox.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use Exception;
+use WP_Error;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Events {
+class Events {
 
     const PROCESS_HOOK = 'adoology_process_events';
     const CLEANUP_HOOK = 'adoology_cleanup_events';
@@ -40,7 +45,7 @@ class Adoology_Events {
         $name          = str_replace('_', '.', $name);
         $anonymous_id  = substr(sanitize_text_field((string) $anonymous_id), 0, 128);
         $session_id    = substr(sanitize_text_field((string) $session_id), 0, 128);
-        $connection_id = Adoology_Connection::connection_id();
+        $connection_id = Connection::connection_id();
         if ($name === '' || $anonymous_id === '') {
             return new WP_Error('adoology_invalid_event', __('Event name and anonymous identifier are required.', 'adoology-connector'));
         }
@@ -62,14 +67,14 @@ class Adoology_Events {
             return new WP_Error('adoology_event_too_large', __('Event payload is too large.', 'adoology-connector'));
         }
 
-        $encrypted = Adoology_Crypto::encrypt($json, 'adoology_event_' . $event_id);
+        $encrypted = Crypto::encrypt($json, 'adoology_event_' . $event_id);
         if (is_wp_error($encrypted)) {
             return $encrypted;
         }
 
         $now      = gmdate('Y-m-d H:i:s');
         $inserted = $wpdb->insert(
-            Adoology_Database::events_table(),
+            Database::events_table(),
             array(
                 'event_id'      => $event_id,
                 'event_name'    => $event['name'],
@@ -97,11 +102,11 @@ class Adoology_Events {
     public static function process() {
         global $wpdb;
 
-        if (!Adoology_Connection::is_connected() || !Adoology_Crypto::has_secret('adoology_api_token')) {
+        if (!Connection::is_connected() || !Crypto::has_secret('adoology_api_token')) {
             return;
         }
 
-        $table = Adoology_Database::events_table();
+        $table = Database::events_table();
         $now   = gmdate('Y-m-d H:i:s');
         $wpdb->query($wpdb->prepare(
             "UPDATE {$table} SET status = 'retrying', lease_token = NULL, lease_expires_at = NULL, available_at = %s, updated_at = %s WHERE status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < %s)",
@@ -135,7 +140,7 @@ class Adoology_Events {
         $events = array();
         $ids    = array();
         foreach ($rows as $row) {
-            $decrypted = Adoology_Crypto::decrypt((string) $row['payload'], 'adoology_event_' . $row['event_id']);
+            $decrypted = Crypto::decrypt((string) $row['payload'], 'adoology_event_' . $row['event_id']);
             $decoded   = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
             if (!is_array($decoded)) {
                 self::mark_failed((int) $row['id'], (int) $row['attempts'], 'Stored event cannot be decrypted.', $lease_token);
@@ -148,7 +153,7 @@ class Adoology_Events {
             return;
         }
 
-        $result = Adoology_API_Client::ingest_events($events, 'ado-events-' . hash('sha256', implode('-', array_column($events, 'id'))));
+        $result = ApiClient::ingest_events($events, 'ado-events-' . hash('sha256', implode('-', array_column($events, 'id'))));
         if (is_wp_error($result)) {
             foreach ($rows as $row) {
                 if (in_array((int) $row['id'], $ids, true)) {
@@ -174,8 +179,8 @@ class Adoology_Events {
     public static function cleanup() {
         global $wpdb;
 
-        $table = Adoology_Database::events_table();
-        $retention = max(1, (int) Adoology_Options::get('adoology_incomplete_expire_days', 7));
+        $table = Database::events_table();
+        $retention = max(1, (int) Options::get('adoology_incomplete_expire_days', 7));
         $wpdb->query($wpdb->prepare(
             "DELETE FROM {$table} WHERE status IN ('pending','retrying','processing','failed') AND created_at < %s",
             gmdate('Y-m-d H:i:s', time() - $retention * DAY_IN_SECONDS)
@@ -197,7 +202,7 @@ class Adoology_Events {
      * @param int|null $timestamp Optional run timestamp.
      */
     public static function schedule_processing($timestamp = null) {
-        Adoology_Scheduler::schedule_single($timestamp ?: time() + 1, self::PROCESS_HOOK, array('async'));
+        Scheduler::schedule_single($timestamp ?: time() + 1, self::PROCESS_HOOK, array('async'));
     }
 
     /**
@@ -215,12 +220,12 @@ class Adoology_Events {
         $terminal = $attempts >= self::MAX_ATTEMPTS;
         $delay    = min(DAY_IN_SECONDS, (int) pow(2, min($attempts, 10)) * 60);
         $wpdb->update(
-            Adoology_Database::events_table(),
+            Database::events_table(),
             array(
                 'status'       => $terminal ? 'failed' : 'retrying',
                 'attempts'     => $attempts,
                 'available_at' => gmdate('Y-m-d H:i:s', time() + $delay),
-                'last_error'   => substr(Adoology_Logger::redact_string(sanitize_text_field($error)), 0, 1000),
+                'last_error'   => substr(Logger::redact_string(sanitize_text_field($error)), 0, 1000),
                 'updated_at'   => gmdate('Y-m-d H:i:s'),
                 'lease_token'  => null,
                 'lease_expires_at' => null,

@@ -2,14 +2,18 @@
 /**
  * Hardened Adoology API client.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use WP_Error;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_API_Client {
+class ApiClient {
 
     const MAX_ATTEMPTS = 3;
 
@@ -19,7 +23,7 @@ class Adoology_API_Client {
      * @return string
      */
     public static function base_url() {
-        $url = self::validate_base_url((string) Adoology_Options::get('adoology_api_base_url', 'https://api.adoology.com'));
+        $url = self::validate_base_url((string) Options::get('adoology_api_base_url', 'https://api.adoology.com'));
         return is_wp_error($url) ? '' : $url;
     }
 
@@ -68,7 +72,7 @@ class Adoology_API_Client {
      * @return string|WP_Error
      */
     public static function token() {
-        return Adoology_Crypto::get_secret('adoology_api_token');
+        return Crypto::get_secret('adoology_api_token');
     }
 
     /**
@@ -166,7 +170,7 @@ class Adoology_API_Client {
                 break;
             }
 
-            Adoology_Logger::log('warning', 'Retrying Adoology API request.', array(
+            Logger::log('warning', 'Retrying Adoology API request.', array(
                 'method'  => $method,
                 'path'    => $path,
                 'attempt' => $attempt + 1,
@@ -176,7 +180,7 @@ class Adoology_API_Client {
         }
 
         if (is_wp_error($last_response)) {
-            Adoology_Logger::log('error', 'Adoology API transport failure.', array('method' => $method, 'path' => $path));
+            Logger::log('error', 'Adoology API transport failure.', array('method' => $method, 'path' => $path));
             return new WP_Error('adoology_api_transport', __('Could not reach the Adoology API.', 'adoology-connector'));
         }
 
@@ -192,7 +196,7 @@ class Adoology_API_Client {
 
         if ($status < 200 || $status >= 300) {
             $message = self::response_error_message($decoded, $status);
-            Adoology_Logger::log('error', 'Adoology API rejected a request.', array('method' => $method, 'path' => $path, 'status' => $status));
+            Logger::log('error', 'Adoology API rejected a request.', array('method' => $method, 'path' => $path, 'status' => $status));
             return new WP_Error('adoology_api_http', $message, array('status' => $status));
         }
 
@@ -201,7 +205,7 @@ class Adoology_API_Client {
         }
 
         if (!$is_json || !is_array($decoded) || json_last_error() !== JSON_ERROR_NONE) {
-            Adoology_Logger::log('error', 'Adoology API returned invalid JSON.', array('method' => $method, 'path' => $path, 'status' => $status));
+            Logger::log('error', 'Adoology API returned invalid JSON.', array('method' => $method, 'path' => $path, 'status' => $status));
             return new WP_Error('adoology_api_invalid_json', __('Adoology API returned an invalid JSON response.', 'adoology-connector'), array('status' => $status));
         }
 
@@ -388,6 +392,6 @@ class Adoology_API_Client {
             );
         }
 
-        return Adoology_Logger::redact_string(sanitize_text_field($message));
+        return Logger::redact_string(sanitize_text_field($message));
     }
 }

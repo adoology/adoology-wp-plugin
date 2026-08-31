@@ -2,14 +2,22 @@
 /**
  * Native WooCommerce webhook payloads, loop suppression, and retries.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use WC_Product;
+use WC_Product_Attribute;
+use WC_Product_Download;
+use WC_Product_Variation;
+use WC_Webhook;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Webhooks {
+class Webhooks {
 
     const RETRY_HOOK       = 'adoology_retry_webhook_delivery';
     const RETRY_LIMIT      = 3;
@@ -56,7 +64,7 @@ class Adoology_Webhooks {
      * @return array
      */
     public static function filter_topic_hooks($hooks, $webhook) {
-        if (!$webhook instanceof WC_Webhook || !Adoology_Connection::is_managed_webhook_id($webhook->get_id())) {
+        if (!$webhook instanceof WC_Webhook || !Connection::is_managed_webhook_id($webhook->get_id())) {
             return $hooks;
         }
 
@@ -94,7 +102,7 @@ class Adoology_Webhooks {
      * @return bool
      */
     public static function filter_should_deliver($should, $webhook, $arg) {
-        if (!$webhook instanceof WC_Webhook || !Adoology_Connection::is_managed_webhook_id($webhook->get_id())) {
+        if (!$webhook instanceof WC_Webhook || !Connection::is_managed_webhook_id($webhook->get_id())) {
             return $should;
         }
 
@@ -134,7 +142,7 @@ class Adoology_Webhooks {
             return false;
         }
 
-        if ($type !== 'product' && in_array($topic, Adoology_Connection::WEBHOOK_TOPICS, true)) {
+        if ($type !== 'product' && in_array($topic, Connection::WEBHOOK_TOPICS, true)) {
             return false;
         }
 
@@ -151,7 +159,7 @@ class Adoology_Webhooks {
      * @return array
      */
     public static function filter_payload($payload, $resource, $resource_id, $webhook_id) {
-        if ($resource !== 'product' || !Adoology_Connection::is_managed_webhook_id($webhook_id)) {
+        if ($resource !== 'product' || !Connection::is_managed_webhook_id($webhook_id)) {
             return $payload;
         }
 
@@ -206,7 +214,7 @@ class Adoology_Webhooks {
      * @return array
      */
     public static function filter_http_args($http_args, $arg, $webhook_id) {
-        if (!Adoology_Connection::is_managed_webhook_id($webhook_id)) {
+        if (!Connection::is_managed_webhook_id($webhook_id)) {
             return $http_args;
         }
 
@@ -239,21 +247,21 @@ class Adoology_Webhooks {
      * @return string
      */
     public static function filter_webhook_secret($stored, $webhook_id) {
-        if (!Adoology_Connection::is_managed_webhook_id($webhook_id)) {
+        if (!Connection::is_managed_webhook_id($webhook_id)) {
             return $stored;
         }
 
         if (!empty(self::$reveal_secret_once[(int) $webhook_id])) {
             unset(self::$reveal_secret_once[(int) $webhook_id]);
-            $secret = Adoology_Crypto::get_secret('adoology_webhook_secret');
+            $secret = Crypto::get_secret('adoology_webhook_secret');
             if (!is_wp_error($secret) && $secret !== '') {
                 return $secret;
             }
-            Adoology_Logger::log('error', 'Managed webhook signing secret could not be read.', array('webhook_id' => (int) $webhook_id));
+            Logger::log('error', 'Managed webhook signing secret could not be read.', array('webhook_id' => (int) $webhook_id));
             return '';
         }
 
-        return Adoology_Connection::WEBHOOK_SECRET_MARKER;
+        return Connection::WEBHOOK_SECRET_MARKER;
     }
 
     /**
@@ -266,7 +274,7 @@ class Adoology_Webhooks {
      * @param int            $webhook_id Webhook ID.
      */
     public static function handle_delivery($http_args, $response, $duration, $arg, $webhook_id) {
-        if (!Adoology_Connection::is_managed_webhook_id($webhook_id)) {
+        if (!Connection::is_managed_webhook_id($webhook_id)) {
             return;
         }
 
@@ -309,9 +317,9 @@ class Adoology_Webhooks {
         }
 
         $webhook_id = (int) $state['webhook_id'];
-        $webhook    = Adoology_Connection::is_managed_webhook_id($webhook_id) ? wc_get_webhook($webhook_id) : null;
-        $secret     = Adoology_Crypto::get_secret('adoology_webhook_secret');
-        if (!$webhook || is_wp_error($secret) || $secret === '' || $webhook->get_delivery_url() !== Adoology_Connection::receiver_url()) {
+        $webhook    = Connection::is_managed_webhook_id($webhook_id) ? wc_get_webhook($webhook_id) : null;
+        $secret     = Crypto::get_secret('adoology_webhook_secret');
+        if (!$webhook || is_wp_error($secret) || $secret === '' || $webhook->get_delivery_url() !== Connection::receiver_url()) {
             self::clear_retry($event_id);
             return;
         }
@@ -350,24 +358,24 @@ class Adoology_Webhooks {
                 $webhook->set_status('active');
             }
             $webhook->save();
-            Adoology_Logger::log('info', 'Adoology webhook retry succeeded.', array('webhook_id' => $webhook_id, 'attempt' => $attempt));
+            Logger::log('info', 'Adoology webhook retry succeeded.', array('webhook_id' => $webhook_id, 'attempt' => $attempt));
             return;
         }
 
         if ($attempt >= self::RETRY_LIMIT) {
             self::clear_retry($event_id);
-            Adoology_Options::update('adoology_last_error', array(
+            Options::update('adoology_last_error', array(
                 'message' => __('A product webhook exhausted its delivery retries.', 'adoology-connector'),
                 'time'    => gmdate('Y-m-d H:i:s'),
             ));
-            Adoology_Logger::log('error', 'Adoology webhook retries exhausted.', array('webhook_id' => $webhook_id, 'status' => $status));
+            Logger::log('error', 'Adoology webhook retries exhausted.', array('webhook_id' => $webhook_id, 'status' => $status));
             return;
         }
 
         $state['attempt'] = $attempt;
         set_transient(self::retry_transient_key($event_id), $state, 2 * DAY_IN_SECONDS);
         self::schedule_retry($event_id, $attempt + 1);
-        Adoology_Logger::log('warning', 'Adoology webhook retry failed.', array('webhook_id' => $webhook_id, 'attempt' => $attempt, 'status' => $status));
+        Logger::log('warning', 'Adoology webhook retry failed.', array('webhook_id' => $webhook_id, 'attempt' => $attempt, 'status' => $status));
     }
 
     /**
@@ -453,14 +461,14 @@ class Adoology_Webhooks {
      * Remove all persisted retry payloads and pending retry actions.
      */
     public static function clear_all_retries() {
-        $index = Adoology_Options::get('adoology_webhook_retry_index', array());
+        $index = Options::get('adoology_webhook_retry_index', array());
         if (is_array($index)) {
             foreach (array_keys($index) as $event_id) {
                 delete_transient(self::retry_transient_key($event_id));
             }
         }
-        Adoology_Options::delete('adoology_webhook_retry_index');
-        Adoology_Scheduler::unschedule_hook(self::RETRY_HOOK);
+        Options::delete('adoology_webhook_retry_index');
+        Scheduler::unschedule_hook(self::RETRY_HOOK);
     }
 
     /**
@@ -473,7 +481,7 @@ class Adoology_Webhooks {
             return self::$valid_sync_request;
         }
 
-        $secret = Adoology_Crypto::get_secret('adoology_webhook_secret');
+        $secret = Crypto::get_secret('adoology_webhook_secret');
         if (is_wp_error($secret) || $secret === '') {
             self::$valid_sync_request = false;
             return false;
@@ -1026,7 +1034,7 @@ class Adoology_Webhooks {
      */
     private static function queue_retry($event_id, $webhook_id, $body) {
         if (!preg_match('/^[a-f0-9]{64}$/D', (string) $event_id) || $body === '' || strlen($body) > self::RETRY_MAX_BODY) {
-            Adoology_Logger::log('error', 'Webhook retry state rejected as invalid or too large.', array('webhook_id' => $webhook_id));
+            Logger::log('error', 'Webhook retry state rejected as invalid or too large.', array('webhook_id' => $webhook_id));
             return;
         }
 
@@ -1035,14 +1043,14 @@ class Adoology_Webhooks {
             return;
         }
 
-        $index = Adoology_Options::get('adoology_webhook_retry_index', array());
+        $index = Options::get('adoology_webhook_retry_index', array());
         $index = is_array($index) ? $index : array();
         if (count($index) >= self::RETRY_MAX_STATES) {
             asort($index, SORT_NUMERIC);
             $oldest = (string) key($index);
             if ($oldest !== '') {
                 self::clear_retry($oldest);
-                $index = Adoology_Options::get('adoology_webhook_retry_index', array());
+                $index = Options::get('adoology_webhook_retry_index', array());
                 $index = is_array($index) ? $index : array();
             }
         }
@@ -1054,7 +1062,7 @@ class Adoology_Webhooks {
             'created_at' => time(),
         ), 2 * DAY_IN_SECONDS);
         $index[$event_id] = time();
-        Adoology_Options::update('adoology_webhook_retry_index', $index);
+        Options::update('adoology_webhook_retry_index', $index);
         self::schedule_retry($event_id, 1);
     }
 
@@ -1067,10 +1075,10 @@ class Adoology_Webhooks {
     private static function schedule_retry($event_id, $attempt) {
         $delays = array(1 => 60, 2 => 300, 3 => 1800);
         $delay  = isset($delays[$attempt]) ? $delays[$attempt] : 1800;
-        $result = Adoology_Scheduler::schedule_single(time() + $delay, self::RETRY_HOOK, array($event_id));
+        $result = Scheduler::schedule_single(time() + $delay, self::RETRY_HOOK, array($event_id));
         if (is_wp_error($result)) {
             self::clear_retry($event_id);
-            Adoology_Logger::log('error', 'Could not schedule an Adoology webhook retry.');
+            Logger::log('error', 'Could not schedule an Adoology webhook retry.');
         }
     }
 
@@ -1084,12 +1092,12 @@ class Adoology_Webhooks {
             return;
         }
         delete_transient(self::retry_transient_key($event_id));
-        $index = Adoology_Options::get('adoology_webhook_retry_index', array());
+        $index = Options::get('adoology_webhook_retry_index', array());
         if (is_array($index) && isset($index[$event_id])) {
             unset($index[$event_id]);
-            Adoology_Options::update('adoology_webhook_retry_index', $index);
+            Options::update('adoology_webhook_retry_index', $index);
         }
-        Adoology_Scheduler::unschedule(self::RETRY_HOOK, array($event_id));
+        Scheduler::unschedule(self::RETRY_HOOK, array($event_id));
     }
 
     /** @return string */

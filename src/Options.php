@@ -2,14 +2,18 @@
 /**
  * Plugin option helpers.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use stdClass;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Options {
+class Options {
 
     /**
      * Return an option.

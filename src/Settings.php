@@ -2,22 +2,26 @@
 /**
  * Adoology administration page.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use WP_Error;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Settings {
+class Settings {
 
     /**
-     * @var Adoology_Settings|null
+     * @var Settings|null
      */
     private static $instance = null;
 
     /**
-     * @return Adoology_Settings
+     * @return Settings
      */
     public static function get_instance() {
         if (self::$instance === null) {
@@ -106,18 +110,18 @@ class Adoology_Settings {
      * @return string
      */
     public function sanitize_api_base_url($value) {
-        $validated = Adoology_API_Client::validate_base_url($value);
+        $validated = ApiClient::validate_base_url($value);
         if (is_wp_error($validated)) {
             add_settings_error('adoology_api_base_url', 'invalid_api_url', $validated->get_error_message());
-            return (string) Adoology_Options::get('adoology_api_base_url', 'https://api.adoology.com');
+            return (string) Options::get('adoology_api_base_url', 'https://api.adoology.com');
         }
-        $current = (string) Adoology_Options::get('adoology_api_base_url', 'https://api.adoology.com');
+        $current = (string) Options::get('adoology_api_base_url', 'https://api.adoology.com');
         if ($current !== '' && !hash_equals($current, $validated)) {
-            if (Adoology_Connection::is_connected()) {
+            if (Connection::is_connected()) {
                 add_settings_error('adoology_api_base_url', 'api_url_locked', __('Disconnect the store before changing the Adoology API URL.', 'adoology-connector'));
                 return $current;
             }
-            Adoology_Options::delete('adoology_api_token');
+            Options::delete('adoology_api_token');
             add_settings_error('adoology_api_base_url', 'api_url_changed', __('API URL changed. Enter the workspace API key again.', 'adoology-connector'), 'warning');
         }
         return $validated;
@@ -131,19 +135,19 @@ class Adoology_Settings {
      */
     public function sanitize_api_token($value) {
         $value  = trim(sanitize_text_field((string) $value));
-        $stored = (string) Adoology_Options::get('adoology_api_token', '');
+        $stored = (string) Options::get('adoology_api_token', '');
         if ($value === '') {
             return $stored;
         }
-        if (strpos($value, Adoology_Crypto::PREFIX) === 0) {
-            return is_wp_error(Adoology_Crypto::decrypt($value, 'adoology_api_token')) ? $stored : $value;
+        if (strpos($value, Crypto::PREFIX) === 0) {
+            return is_wp_error(Crypto::decrypt($value, 'adoology_api_token')) ? $stored : $value;
         }
-        if (!Adoology_API_Client::is_valid_token($value)) {
+        if (!ApiClient::is_valid_token($value)) {
             add_settings_error('adoology_api_token', 'invalid_api_token', __('Enter a valid Adoology workspace API key beginning with dc_.', 'adoology-connector'));
             return $stored;
         }
 
-        $encrypted = Adoology_Crypto::encrypt($value, 'adoology_api_token');
+        $encrypted = Crypto::encrypt($value, 'adoology_api_token');
         if (is_wp_error($encrypted)) {
             add_settings_error('adoology_api_token', 'token_encryption_failed', $encrypted->get_error_message());
             return $stored;
@@ -175,7 +179,7 @@ class Adoology_Settings {
      */
     public function handle_connect() {
         $this->authorize_action('adoology_connect');
-        $result = Adoology_Connection::connect();
+        $result = Connection::connect();
         if (is_string($result)) {
             wp_safe_redirect($result);
             exit;
@@ -189,7 +193,7 @@ class Adoology_Settings {
      */
     public function handle_test_connection() {
         $this->authorize_action('adoology_test_connection');
-        $this->redirect_with_result('adoology_test', Adoology_Connection::refresh_status());
+        $this->redirect_with_result('adoology_test', Connection::refresh_status());
     }
 
     /**
@@ -197,7 +201,7 @@ class Adoology_Settings {
      */
     public function handle_disconnect() {
         $this->authorize_action('adoology_disconnect');
-        $this->redirect_with_result('adoology_disconnect', Adoology_Connection::disconnect());
+        $this->redirect_with_result('adoology_disconnect', Connection::disconnect());
     }
 
     /**
@@ -205,10 +209,10 @@ class Adoology_Settings {
      */
     public function handle_sync_products() {
         $this->authorize_action('adoology_sync_products');
-        $connection_id = Adoology_Connection::connection_id();
+        $connection_id = Connection::connection_id();
         $result = $connection_id === ''
             ? new WP_Error('adoology_not_connected', __('Connect the store before starting synchronization.', 'adoology-connector'))
-            : Adoology_API_Client::start_product_sync($connection_id);
+            : ApiClient::start_product_sync($connection_id);
         $this->redirect_with_result('adoology_sync', is_wp_error($result) ? $result : true);
     }
 
@@ -219,8 +223,8 @@ class Adoology_Settings {
         global $wpdb;
 
         $this->authorize_action('adoology_retry_events');
-        $wpdb->query("UPDATE " . Adoology_Database::events_table() . " SET status = 'pending', attempts = 0, available_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE status IN ('failed','retrying')");
-        Adoology_Events::schedule_processing();
+        $wpdb->query("UPDATE " . Database::events_table() . " SET status = 'pending', attempts = 0, available_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE status IN ('failed','retrying')");
+        Events::schedule_processing();
         $this->redirect_with_result('adoology_retry', true);
     }
 
@@ -232,11 +236,11 @@ class Adoology_Settings {
             return;
         }
 
-        $connection_id = Adoology_Connection::connection_id();
-        $state         = Adoology_Options::get('adoology_connection_state', array());
+        $connection_id = Connection::connection_id();
+        $state         = Options::get('adoology_connection_state', array());
         $state         = is_array($state) ? $state : array();
         $status        = isset($state['status']) ? sanitize_key((string) $state['status']) : 'not_connected';
-        $token_set     = Adoology_Crypto::has_secret('adoology_api_token');
+        $token_set     = Crypto::has_secret('adoology_api_token');
         ?>
         <div class="wrap">
             <h1><?php esc_html_e('Adoology', 'adoology-connector'); ?></h1>
@@ -281,7 +285,7 @@ class Adoology_Settings {
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row"><label for="adoology_api_base_url"><?php esc_html_e('Adoology API URL', 'adoology-connector'); ?></label></th>
-                        <td><input name="adoology_api_base_url" id="adoology_api_base_url" type="url" class="regular-text" value="<?php echo esc_attr((string) Adoology_Options::get('adoology_api_base_url', 'https://api.adoology.com')); ?>" required /></td>
+                        <td><input name="adoology_api_base_url" id="adoology_api_base_url" type="url" class="regular-text" value="<?php echo esc_attr((string) Options::get('adoology_api_base_url', 'https://api.adoology.com')); ?>" required /></td>
                     </tr>
                     <tr>
                         <th scope="row"><label for="adoology_api_token"><?php esc_html_e('Workspace API Key', 'adoology-connector'); ?></label></th>
@@ -324,16 +328,16 @@ class Adoology_Settings {
         global $wpdb;
 
         $this->guard_page();
-        $state = Adoology_Options::get('adoology_connection_state', array());
+        $state = Options::get('adoology_connection_state', array());
         $state = is_array($state) ? $state : array();
-        $events = $wpdb->get_results("SELECT status, COUNT(*) AS total FROM " . Adoology_Database::events_table() . ' GROUP BY status', OBJECT_K);
-        $incomplete = $wpdb->get_results("SELECT status, COUNT(*) AS total FROM " . Adoology_Database::incomplete_table() . ' GROUP BY status', OBJECT_K);
+        $events = $wpdb->get_results("SELECT status, COUNT(*) AS total FROM " . Database::events_table() . ' GROUP BY status', OBJECT_K);
+        $incomplete = $wpdb->get_results("SELECT status, COUNT(*) AS total FROM " . Database::incomplete_table() . ' GROUP BY status', OBJECT_K);
         $risk_orders = wc_get_orders(array(
             'limit'      => 1,
             'paginate'   => true,
             'meta_query' => array(array(
                 'key'     => '_adoology_risk_score',
-                'value'   => max(1, (int) Adoology_Options::get('adoology_fraud_flag_threshold', 30)),
+                'value'   => max(1, (int) Options::get('adoology_fraud_flag_threshold', 30)),
                 'compare' => '>=',
                 'type'    => 'NUMERIC',
             )),
@@ -376,8 +380,8 @@ class Adoology_Settings {
      */
     public function render_sync() {
         $this->guard_page();
-        $connection_id = Adoology_Connection::connection_id();
-        $runs          = $connection_id ? Adoology_API_Client::get_sync_runs($connection_id) : new WP_Error('not_connected', __('Store is not connected.', 'adoology-connector'));
+        $connection_id = Connection::connection_id();
+        $runs          = $connection_id ? ApiClient::get_sync_runs($connection_id) : new WP_Error('not_connected', __('Store is not connected.', 'adoology-connector'));
         ?>
         <div class="wrap"><h1><?php esc_html_e('Adoology Sync', 'adoology-connector'); ?></h1>
             <?php $this->render_action_notice(); ?>
@@ -413,7 +417,7 @@ class Adoology_Settings {
             return;
         }
 
-        $rows = $wpdb->get_results("SELECT * FROM " . Adoology_Database::incomplete_table() . ' ORDER BY updated_at DESC LIMIT 100', ARRAY_A);
+        $rows = $wpdb->get_results("SELECT * FROM " . Database::incomplete_table() . ' ORDER BY updated_at DESC LIMIT 100', ARRAY_A);
         ?>
         <div class="wrap"><h1><?php esc_html_e('Incomplete Orders', 'adoology-connector'); ?></h1>
             <p><?php esc_html_e('Checkout and landing-page starts are marked incomplete after the configured inactivity window. Records are read-only here; contact, recovery, and order creation are managed in Adoology.', 'adoology-connector'); ?></p>
@@ -434,7 +438,7 @@ class Adoology_Settings {
     private function render_incomplete_detail($id) {
         global $wpdb;
 
-        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . Adoology_Database::incomplete_table() . ' WHERE id = %d', $id), ARRAY_A);
+        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . Database::incomplete_table() . ' WHERE id = %d', $id), ARRAY_A);
         if (!$row) {
             echo '<div class="wrap"><h1>' . esc_html__('Incomplete Orders', 'adoology-connector') . '</h1><div class="notice notice-error inline"><p>' . esc_html__('Record not found.', 'adoology-connector') . '</p></div><p><a class="button" href="' . esc_url(admin_url('admin.php?page=adoology-incomplete')) . '">' . esc_html__('Back to list', 'adoology-connector') . '</a></p></div>';
 
@@ -480,7 +484,7 @@ class Adoology_Settings {
      */
     public function render_fraud() {
         $this->guard_page();
-        $threshold = max(1, (int) Adoology_Options::get('adoology_fraud_flag_threshold', 30));
+        $threshold = max(1, (int) Options::get('adoology_fraud_flag_threshold', 30));
         $orders = wc_get_orders(array(
             'limit'      => 50,
             'orderby'    => 'date',
@@ -490,7 +494,7 @@ class Adoology_Settings {
         ?>
         <div class="wrap"><h1><?php esc_html_e('Fraud Protection', 'adoology-connector'); ?></h1>
             <p><?php esc_html_e('Signals use direct IP velocity, duplicate contacts/products, invalid contact data, suspicious user agents, and a server-side honeypot.', 'adoology-connector'); ?></p>
-            <p><strong><?php esc_html_e('Actions:', 'adoology-connector'); ?></strong> <?php printf(esc_html__('Flag at %1$d, hold at %2$d, block at %3$d.', 'adoology-connector'), $threshold, (int) Adoology_Options::get('adoology_fraud_hold_threshold', 60), (int) Adoology_Options::get('adoology_fraud_block_threshold', 90)); ?></p>
+            <p><strong><?php esc_html_e('Actions:', 'adoology-connector'); ?></strong> <?php printf(esc_html__('Flag at %1$d, hold at %2$d, block at %3$d.', 'adoology-connector'), $threshold, (int) Options::get('adoology_fraud_hold_threshold', 60), (int) Options::get('adoology_fraud_block_threshold', 90)); ?></p>
             <table class="widefat striped"><thead><tr><th><?php esc_html_e('Order', 'adoology-connector'); ?></th><th><?php esc_html_e('Score', 'adoology-connector'); ?></th><th><?php esc_html_e('Action', 'adoology-connector'); ?></th><th><?php esc_html_e('Signals', 'adoology-connector'); ?></th><th><?php esc_html_e('Status', 'adoology-connector'); ?></th></tr></thead><tbody>
             <?php if (!$orders) : ?><tr><td colspan="5"><?php esc_html_e('No flagged orders.', 'adoology-connector'); ?></td></tr><?php endif; ?>
             <?php foreach ($orders as $order) : ?><tr><td><a href="<?php echo esc_url($this->order_edit_url($order->get_id())); ?>">#<?php echo esc_html((string) $order->get_id()); ?></a></td><td><?php echo esc_html((string) $order->get_meta('_adoology_risk_score', true)); ?>/100</td><td><?php echo esc_html((string) $order->get_meta('_adoology_risk_action', true)); ?></td><td><?php echo esc_html(implode(', ', (array) json_decode((string) $order->get_meta('_adoology_risk_signals', true), true))); ?></td><td><?php echo esc_html(wc_get_order_status_name($order->get_status())); ?></td></tr><?php endforeach; ?>
@@ -547,7 +551,7 @@ class Adoology_Settings {
         global $wpdb;
 
         $this->guard_page();
-        $rows = $wpdb->get_results("SELECT event_id, event_name, status, attempts, last_error, created_at, sent_at FROM " . Adoology_Database::events_table() . ' ORDER BY id DESC LIMIT 100', ARRAY_A);
+        $rows = $wpdb->get_results("SELECT event_id, event_name, status, attempts, last_error, created_at, sent_at FROM " . Database::events_table() . ' ORDER BY id DESC LIMIT 100', ARRAY_A);
         ?>
         <div class="wrap"><h1><?php esc_html_e('Adoology Logs', 'adoology-connector'); ?></h1><?php $this->render_action_notice(); ?>
             <?php $this->admin_styles(); ?>
@@ -580,7 +584,7 @@ class Adoology_Settings {
         if (empty($row['customer_data'])) {
             return array();
         }
-        $decrypted = Adoology_Crypto::decrypt($row['customer_data'], 'adoology_checkout_' . $row['checkout_id']);
+        $decrypted = Crypto::decrypt($row['customer_data'], 'adoology_checkout_' . $row['checkout_id']);
         $decoded   = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
         return is_array($decoded) ? $decoded : array();
     }
@@ -592,11 +596,11 @@ class Adoology_Settings {
 
     private function checkbox_row($option, $label) {
         $default = $option === 'adoology_tracking_enabled' ? 'no' : 'yes';
-        ?><tr><th scope="row"><?php echo esc_html($label); ?></th><td><label><input type="checkbox" name="<?php echo esc_attr($option); ?>" value="yes" <?php checked(Adoology_Options::get($option, $default), 'yes'); ?> /> <?php esc_html_e('Enabled', 'adoology-connector'); ?></label></td></tr><?php
+        ?><tr><th scope="row"><?php echo esc_html($label); ?></th><td><label><input type="checkbox" name="<?php echo esc_attr($option); ?>" value="yes" <?php checked(Options::get($option, $default), 'yes'); ?> /> <?php esc_html_e('Enabled', 'adoology-connector'); ?></label></td></tr><?php
     }
 
     private function number_row($option, $label, $min, $max) {
-        ?><tr><th scope="row"><label for="<?php echo esc_attr($option); ?>"><?php echo esc_html($label); ?></label></th><td><input type="number" class="small-text" id="<?php echo esc_attr($option); ?>" name="<?php echo esc_attr($option); ?>" value="<?php echo esc_attr((string) Adoology_Options::get($option, $min)); ?>" min="<?php echo esc_attr((string) $min); ?>" max="<?php echo esc_attr((string) $max); ?>" /></td></tr><?php
+        ?><tr><th scope="row"><label for="<?php echo esc_attr($option); ?>"><?php echo esc_html($label); ?></label></th><td><input type="number" class="small-text" id="<?php echo esc_attr($option); ?>" name="<?php echo esc_attr($option); ?>" value="<?php echo esc_attr((string) Options::get($option, $min)); ?>" min="<?php echo esc_attr((string) $min); ?>" max="<?php echo esc_attr((string) $max); ?>" /></td></tr><?php
     }
 
     private function admin_styles() {
@@ -625,7 +629,7 @@ class Adoology_Settings {
         set_transient('adoology_admin_notice_' . get_current_user_id(), array(
             'action'  => sanitize_key($action),
             'status'  => is_wp_error($result) ? 'error' : 'ok',
-            'message' => is_wp_error($result) ? Adoology_Logger::redact_string(sanitize_text_field($result->get_error_message())) : '',
+            'message' => is_wp_error($result) ? Logger::redact_string(sanitize_text_field($result->get_error_message())) : '',
         ), MINUTE_IN_SECONDS);
         $pages = array(
             'adoology_connect'    => 'adoology-connection',

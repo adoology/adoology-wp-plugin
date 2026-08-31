@@ -2,14 +2,16 @@
 /**
  * Redacting WooCommerce logger wrapper.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Logger {
+class Logger {
 
     const SOURCE = 'adoology-connector';
 

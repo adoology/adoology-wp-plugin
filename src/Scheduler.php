@@ -2,14 +2,19 @@
 /**
  * Action Scheduler with WP-Cron fallback.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use Throwable;
+use WP_Error;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Scheduler {
+class Scheduler {
 
     const GROUP = 'adoology-connector';
 
@@ -35,7 +40,7 @@ class Adoology_Scheduler {
                     return true;
                 }
             } catch (Throwable $throwable) {
-                Adoology_Logger::log('warning', 'Action Scheduler rejected an Adoology action.', array('hook' => $hook));
+                Logger::log('warning', 'Action Scheduler rejected an Adoology action.', array('hook' => $hook));
             }
         }
 

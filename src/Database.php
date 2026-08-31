@@ -2,14 +2,16 @@
 /**
  * Plugin database installation and upgrades.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Database {
+class Database {
 
     const VERSION = '1.1.0';
 
@@ -73,14 +75,14 @@ class Adoology_Database {
             KEY expires_at (expires_at)
         ) {$charset_collate};");
 
-        Adoology_Options::update('adoology_db_version', self::VERSION);
+        Options::update('adoology_db_version', self::VERSION);
     }
 
     /**
      * Upgrade when source schema changes.
      */
     public static function maybe_upgrade() {
-        if ((string) Adoology_Options::get('adoology_db_version', '') !== self::VERSION) {
+        if ((string) Options::get('adoology_db_version', '') !== self::VERSION) {
             self::install();
         }
     }

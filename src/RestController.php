@@ -12,14 +12,21 @@
  * The product may also be addressed by WooCommerce "product_id" or
  * "variation_id" inside data; SKU has the lowest precedence.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use WC_Product;
+use WP_Error;
+use WP_REST_Request;
+use WP_REST_Server;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_REST_Controller {
+class RestController {
 
     /**
      * Events this endpoint accepts.

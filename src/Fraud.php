@@ -2,14 +2,18 @@
 /**
  * Local bot, velocity, duplicate-order, and fraud protection.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use WC_Order;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Fraud {
+class Fraud {
 
     /**
      * Request-scoped assessment for classic checkout.
@@ -103,7 +107,7 @@ class Adoology_Fraud {
         );
         $assessment = self::evaluate($data, self::order_product_ids($order), true);
         if ($assessment['action'] === 'block' && class_exists('Automattic\\WooCommerce\\StoreApi\\Exceptions\\RouteException')) {
-            throw new Automattic\WooCommerce\StoreApi\Exceptions\RouteException(
+            throw new \Automattic\WooCommerce\StoreApi\Exceptions\RouteException(
                 'adoology_risk_blocked',
                 __('We could not accept this order. Please contact the store for assistance.', 'adoology-connector'),
                 403
@@ -157,7 +161,7 @@ class Adoology_Fraud {
         }
 
         $attempts = self::attempt_count($count_attempt);
-        $limit    = max(2, (int) Adoology_Options::get('adoology_fraud_rate_limit', 5));
+        $limit    = max(2, (int) Options::get('adoology_fraud_rate_limit', 5));
         if ($attempts > $limit) {
             $score += min(50, 15 + ($attempts - $limit) * 5);
             $signals[] = 'ip_velocity';
@@ -169,9 +173,9 @@ class Adoology_Fraud {
         }
 
         $score = min(100, $score);
-        $flag  = max(1, (int) Adoology_Options::get('adoology_fraud_flag_threshold', 30));
-        $hold  = max($flag, (int) Adoology_Options::get('adoology_fraud_hold_threshold', 60));
-        $block = max($hold, (int) Adoology_Options::get('adoology_fraud_block_threshold', 90));
+        $flag  = max(1, (int) Options::get('adoology_fraud_flag_threshold', 30));
+        $hold  = max($flag, (int) Options::get('adoology_fraud_hold_threshold', 60));
+        $block = max($hold, (int) Options::get('adoology_fraud_block_threshold', 90));
         $action = $score >= $block ? 'block' : ($score >= $hold ? 'hold' : ($score >= $flag ? 'flag' : 'allow'));
 
         return array(
@@ -187,7 +191,7 @@ class Adoology_Fraud {
      * @return bool
      */
     public static function enabled() {
-        return Adoology_Options::get('adoology_fraud_enabled', 'yes') === 'yes';
+        return Options::get('adoology_fraud_enabled', 'yes') === 'yes';
     }
 
     /**
@@ -225,12 +229,12 @@ class Adoology_Fraud {
             $order->add_order_note(__('Flagged by Adoology local risk assessment.', 'adoology-connector'));
         }
 
-        $queued = Adoology_Events::enqueue('risk.assessed', Adoology_Incomplete_Orders::anonymous_id(), Adoology_Incomplete_Orders::identity()['session_id'], array(
+        $queued = Events::enqueue('risk.assessed', IncompleteOrders::anonymous_id(), IncompleteOrders::identity()['session_id'], array(
             'order_id'   => $order->get_id(),
             'risk_score' => $score,
             'action'     => $action ?: 'allow',
             'signals'    => $signals,
-        ), Adoology_Incomplete_Orders::request_context());
+        ), IncompleteOrders::request_context());
         if (!is_wp_error($queued)) {
             $order->update_meta_data('_adoology_risk_event_sent', 'yes');
             $order->save_meta_data();
@@ -238,7 +242,7 @@ class Adoology_Fraud {
     }
 
     private static function attempt_count($increment) {
-        $ip    = Adoology_Incomplete_Orders::client_ip();
+        $ip    = IncompleteOrders::client_ip();
         $key   = 'adoology_attempt_' . hash_hmac('sha256', $ip, wp_salt('nonce'));
         $count = (int) get_transient($key);
         if ($increment) {
@@ -252,7 +256,7 @@ class Adoology_Fraud {
         if (!function_exists('wc_get_orders')) {
             return false;
         }
-        $minutes = max(5, (int) Adoology_Options::get('adoology_duplicate_window_minutes', 60));
+        $minutes = max(5, (int) Options::get('adoology_duplicate_window_minutes', 60));
         $base_args = array(
             'limit'        => 10,
             'return'       => 'objects',

@@ -2,14 +2,19 @@
 /**
  * Authenticated encryption for locally retained credentials.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
+
+namespace Adoology;
+
+use Exception;
+use WP_Error;
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class Adoology_Crypto {
+class Crypto {
 
     const PREFIX = 'ado:gcm:1:';
     const CIPHER = 'aes-256-gcm';
@@ -131,7 +136,7 @@ class Adoology_Crypto {
      */
     public static function set_secret($option, $plaintext) {
         if ((string) $plaintext === '') {
-            Adoology_Options::delete($option);
+            Options::delete($option);
             return true;
         }
 
@@ -140,7 +145,7 @@ class Adoology_Crypto {
             return $encrypted;
         }
 
-        if (!Adoology_Options::update($option, $encrypted) && (string) Adoology_Options::get($option, '') !== $encrypted) {
+        if (!Options::update($option, $encrypted) && (string) Options::get($option, '') !== $encrypted) {
             return new WP_Error('adoology_secret_store_failed', __('Credential storage failed.', 'adoology-connector'));
         }
         return true;
@@ -153,7 +158,7 @@ class Adoology_Crypto {
      * @return string|WP_Error
      */
     public static function get_secret($option) {
-        $stored = (string) Adoology_Options::get($option, '');
+        $stored = (string) Options::get($option, '');
         if ($stored === '') {
             return '';
         }
@@ -176,7 +181,7 @@ class Adoology_Crypto {
      * @return bool
      */
     public static function has_secret($option) {
-        return (string) Adoology_Options::get($option, '') !== '';
+        return (string) Options::get($option, '') !== '';
     }
 
     /**

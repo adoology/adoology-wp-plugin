@@ -733,38 +733,51 @@ The backend callback may still have succeeded; use **Test Connection** in WordPr
 
 ### Repository layout
 
+The plugin is structured as a Composer package with PSR-4 autoloading (`Adoology\` → `src/`) and a PHPUnit unit test suite.
+
 ```text
-adoology-connector.php                 Plugin bootstrap and lifecycle hooks
+adoology-connector.php                 Plugin bootstrap: header, constants, Composer autoload
+composer.json                          Package metadata, autoloading, dev dependencies
+phpunit.xml.dist                       PHPUnit configuration
+src/Plugin.php                         Registration, activation, deactivation, scheduling
 uninstall.php                          Remote/local teardown and table cleanup
 assets/js/checkout-tracker.js          Checkout identity and snapshot capture
 assets/js/order-form-block.js          Dynamic block editor registration
-includes/class-adoology-api-client.php Safe authenticated backend HTTP client
-includes/class-adoology-connection.php Connection lifecycle and URL validation
-includes/class-adoology-crypto.php     AES-256-GCM secret encryption
-includes/class-adoology-database.php   Local schema installation and upgrades
-includes/class-adoology-events.php     Durable encrypted event outbox
-includes/class-adoology-fraud.php      Local checkout risk assessment
-includes/class-adoology-incomplete-orders.php Checkout lifecycle and privacy tools
-includes/class-adoology-key-revocation.php Signed backend key-revocation endpoint
-includes/class-adoology-logger.php     Redacting WooCommerce logger
-includes/class-adoology-options.php    Non-autoloaded plugin option helpers/defaults
-includes/class-adoology-order-form.php Shortcode, block rendering, and order creation
-includes/class-adoology-scheduler.php  Action Scheduler and WP-Cron abstraction
-includes/class-adoology-settings.php   Admin pages and settings
-includes/class-adoology-webhooks.php   Dormant legacy local-webhook implementation
-includes/class-adoology-rest-controller.php Dormant legacy stock-push endpoint
+src/ApiClient.php                      Safe authenticated backend HTTP client
+src/Connection.php                     Connection lifecycle and URL validation
+src/Crypto.php                         AES-256-GCM secret encryption
+src/Database.php                       Local schema installation and upgrades
+src/Events.php                         Durable encrypted event outbox
+src/Fraud.php                          Local checkout risk assessment
+src/IncompleteOrders.php               Checkout lifecycle and privacy tools
+src/KeyRevocation.php                  Signed backend key-revocation endpoint
+src/Logger.php                         Redacting WooCommerce logger
+src/Options.php                        Non-autoloaded plugin option helpers/defaults
+src/OrderForm.php                      Shortcode, block rendering, and order creation
+src/Scheduler.php                      Action Scheduler and WP-Cron abstraction
+src/Settings.php                       Admin pages and settings
+src/Webhooks.php                       Dormant legacy local-webhook implementation
+src/RestController.php                 Dormant legacy stock-push endpoint
+tests/                                 PHPUnit unit tests (Brain Monkey)
 ```
 
-`class-adoology-webhooks.php` and `class-adoology-rest-controller.php` are present in the package but are intentionally not loaded by `adoology-connector.php`. Current production architecture uses backend-managed native WooCommerce webhooks. Do not register the dormant classes unless the backend integration contract is deliberately changed and tested.
+`src/Webhooks.php` and `src/RestController.php` are present in the package but are intentionally not registered by `Plugin::init()`. Current production architecture uses backend-managed native WooCommerce webhooks. Do not register the dormant classes unless the backend integration contract is deliberately changed and tested.
+
+### Installation and tests
+
+Install dependencies and run the unit test suite:
+
+```bash
+composer install
+composer test
+```
 
 ### Syntax checks
 
 Run PHP syntax validation:
 
 ```bash
-for file in adoology-connector.php uninstall.php includes/*.php; do
-    php -l "$file" || exit 1
-done
+composer lint
 ```
 
 Run JavaScript syntax validation:
@@ -775,7 +788,7 @@ for file in assets/js/*.js; do
 done
 ```
 
-This repository currently contains no standalone automated test suite. Integration behavior should also be verified against a disposable WordPress/WooCommerce site and a compatible Adoology backend.
+Unit tests cover crypto round-trips, option handling, log redaction, API URL/token validation, fraud scoring, webhook signature validation, and event payload sanitization. Integration behavior should also be verified against a disposable WordPress/WooCommerce site and a compatible Adoology backend.
 
 ### Release checklist
 

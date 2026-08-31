@@ -2,24 +2,20 @@
 /**
  * Remove Adoology connection state and legacy local artifacts.
  *
- * @package Adoology_Connector
+ * @package Adoology
  */
 
 if (!defined('WP_UNINSTALL_PLUGIN')) {
     exit;
 }
 
-if (!defined('ADOOLOGY_VERSION')) {
-    define('ADOOLOGY_VERSION', '0.1.0');
-}
-if (!defined('ADOOLOGY_PLUGIN_DIR')) {
-    define('ADOOLOGY_PLUGIN_DIR', plugin_dir_path(__FILE__));
+if (!is_readable(__DIR__ . '/vendor/autoload.php')) {
+    exit;
 }
 
-require_once ADOOLOGY_PLUGIN_DIR . 'includes/class-adoology-options.php';
-require_once ADOOLOGY_PLUGIN_DIR . 'includes/class-adoology-crypto.php';
-require_once ADOOLOGY_PLUGIN_DIR . 'includes/class-adoology-logger.php';
-require_once ADOOLOGY_PLUGIN_DIR . 'includes/class-adoology-api-client.php';
+require_once __DIR__ . '/vendor/autoload.php';
+
+use Adoology\ApiClient;
 
 /**
  * Uninstall plugin data for current site.
@@ -30,12 +26,12 @@ function adoology_uninstall_site() {
     $preserve_remote_state = false;
     $connection_id         = (string) get_option('adoology_connection_id', '');
     if (preg_match('/^[0-9A-HJKMNP-TV-Z]{26}$/Di', $connection_id)) {
-        $remote_result = Adoology_API_Client::delete_connection(
+        $remote_result = ApiClient::delete_connection(
             $connection_id,
-            Adoology_API_Client::new_idempotency_key(),
+            ApiClient::new_idempotency_key(),
             true
         );
-        $preserve_remote_state = is_wp_error($remote_result) && Adoology_API_Client::error_status($remote_result) !== 404;
+        $preserve_remote_state = is_wp_error($remote_result) && ApiClient::error_status($remote_result) !== 404;
     }
 
     foreach ((array) get_option('adoology_wc_webhook_ids', array()) as $webhook_id) {
