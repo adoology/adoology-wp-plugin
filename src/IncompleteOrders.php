@@ -453,22 +453,18 @@ class IncompleteOrders
             gmdate('Y-m-d H:i:s', time() - 15 * MINUTE_IN_SECONDS)
         ));
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT id, checkout_id, session_id, flow, product_id, quantity, value_minor, currency, form_stage, customer_data FROM {$table} WHERE status = 'started' AND last_activity_at < %s LIMIT 100",
+            "SELECT id, checkout_id, session_id, flow, product_id, variation_id, quantity, value_minor, currency, form_stage, customer_data FROM {$table} WHERE status = 'started' AND last_activity_at < %s LIMIT 100",
             gmdate('Y-m-d H:i:s', time() - $timeout)
         ), ARRAY_A);
         foreach ($rows as $row) {
             $updated = $wpdb->update($table, ['status' => 'incomplete', 'updated_at' => gmdate('Y-m-d H:i:s')], ['id' => (int) $row['id'], 'status' => 'started']);
             if ($updated && Options::get('adoology_tracking_enabled', 'no') === 'yes') {
-                Events::enqueue('checkout.incomplete', self::anonymous_for_checkout($row['checkout_id']), $row['session_id'], [
-                    'checkout_id' => $row['checkout_id'],
-                    'flow' => $row['flow'],
-                    'product_id' => (int) $row['product_id'],
-                    'quantity' => (int) $row['quantity'],
-                    'value_minor' => (int) $row['value_minor'],
-                    'currency' => $row['currency'],
-                    'form_stage' => $row['form_stage'],
-                    'customer' => self::contact_payload((string) ($row['customer_data'] ?? ''), $row['checkout_id']),
-                ]);
+                Events::enqueue(
+                    'checkout.incomplete',
+                    self::anonymous_for_checkout($row['checkout_id']),
+                    $row['session_id'],
+                    self::incomplete_event_properties($row)
+                );
             }
         }
 
@@ -760,6 +756,39 @@ class IncompleteOrders
         }
 
         return $contact;
+    }
+
+    /**
+     * Build trusted product details for an incomplete checkout event.
+     *
+     * @param  array  $row  Stored checkout row.
+     * @return array
+     */
+    private static function incomplete_event_properties($row)
+    {
+        $product_id = (int) ($row['product_id'] ?? 0);
+        $variation_id = (int) ($row['variation_id'] ?? 0);
+        $properties = [
+            'checkout_id' => $row['checkout_id'],
+            'flow' => $row['flow'],
+            'product_id' => $product_id,
+            'variation_id' => $variation_id,
+            'quantity' => (int) $row['quantity'],
+            'value_minor' => (int) $row['value_minor'],
+            'currency' => $row['currency'],
+            'form_stage' => $row['form_stage'],
+            'customer' => self::contact_payload((string) ($row['customer_data'] ?? ''), $row['checkout_id']),
+        ];
+        $product = wc_get_product($variation_id ?: $product_id);
+        if ($product) {
+            $product_name = sanitize_text_field((string) $product->get_name());
+            $product_name = function_exists('mb_substr') ? mb_substr($product_name, 0, 190) : substr($product_name, 0, 190);
+            if ($product_name !== '') {
+                $properties['product_name'] = $product_name;
+            }
+        }
+
+        return $properties;
     }
 
     /**

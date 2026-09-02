@@ -272,6 +272,18 @@ class Settings
                     <th scope="row"><?php esc_html_e('Status', 'adoology-connector'); ?></th>
                     <td><strong><?php echo esc_html(ucwords(str_replace('_', ' ', $status))); ?></strong></td>
                 </tr>
+                <?php if (!empty($state['name'])) : ?>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Store', 'adoology-connector'); ?></th>
+                        <td><?php echo esc_html((string) $state['name']); ?></td>
+                    </tr>
+                <?php endif; ?>
+                <?php if (!empty($state['base_url'])) : ?>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Store URL', 'adoology-connector'); ?></th>
+                        <td><code><?php echo esc_html((string) $state['base_url']); ?></code></td>
+                    </tr>
+                <?php endif; ?>
                 <?php if ($connection_id !== '') : ?>
                     <tr>
                         <th scope="row"><?php esc_html_e('Connection ID', 'adoology-connector'); ?></th>

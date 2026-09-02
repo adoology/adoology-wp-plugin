@@ -103,17 +103,29 @@ class Connection
         $connection_id = isset($created['data']['id']) ? (string) $created['data']['id'] : '';
         $redirect_url = isset($created['meta']['redirect_uri']) ? (string) $created['meta']['redirect_uri'] : '';
         $webhook_secret = isset($created['meta']['webhook_secret']) ? (string) $created['meta']['webhook_secret'] : '';
+        $existing = isset($created['meta']['existing']) && $created['meta']['existing'] === true;
         if (!self::is_valid_connection_id($connection_id)) {
             return self::fail(new WP_Error('adoology_bad_connection_response', __('Adoology returned an invalid connection identifier.', 'adoology-connector')));
         }
 
+        if ($existing && $redirect_url === '' && $webhook_secret === '') {
+            Options::update('adoology_connection_id', $connection_id);
+            self::store_backend_state($created);
+            Options::delete('adoology_create_idempotency_key');
+            Options::delete('adoology_last_error');
+
+            return true;
+        }
+
         if (!preg_match('/^[a-f0-9]{64}$/Di', $webhook_secret) || !self::is_safe_authorization_url($redirect_url, $connection_id, $webhook_secret)) {
-            $deleted = ApiClient::delete_connection($connection_id, ApiClient::new_idempotency_key());
-            if (is_wp_error($deleted)) {
-                Options::update('adoology_connection_id', $connection_id);
-                self::store_backend_state($created, 'authorization_error');
-            } else {
-                Options::delete('adoology_create_idempotency_key');
+            if (!$existing) {
+                $deleted = ApiClient::delete_connection($connection_id, ApiClient::new_idempotency_key());
+                if (is_wp_error($deleted)) {
+                    Options::update('adoology_connection_id', $connection_id);
+                    self::store_backend_state($created, 'authorization_error');
+                } else {
+                    Options::delete('adoology_create_idempotency_key');
+                }
             }
 
             return self::fail(new WP_Error('adoology_bad_authorization_url', __('Adoology returned an invalid WooCommerce authorization URL.', 'adoology-connector')));
@@ -414,6 +426,11 @@ class Connection
         ];
 
         foreach (['last_full_sync_at', 'last_incremental_sync_at', 'last_error_at'] as $field) {
+            if (isset($attributes[$field]) && is_string($attributes[$field])) {
+                $state[$field] = sanitize_text_field($attributes[$field]);
+            }
+        }
+        foreach (['name', 'base_url', 'timezone', 'presentment_currency'] as $field) {
             if (isset($attributes[$field]) && is_string($attributes[$field])) {
                 $state[$field] = sanitize_text_field($attributes[$field]);
             }
