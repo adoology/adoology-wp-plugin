@@ -83,25 +83,31 @@ class Settings
             'default' => '',
         ]);
 
-        foreach (['adoology_tracking_enabled', 'adoology_fraud_enabled', 'adoology_order_form_enabled'] as $option) {
+        $checkbox_defaults = [
+            'adoology_tracking_enabled' => 'no',
+            'adoology_fraud_enabled' => 'yes',
+            'adoology_order_form_enabled' => 'yes',
+        ];
+        foreach ($checkbox_defaults as $option => $default) {
             register_setting('adoology_features', $option, [
                 'type' => 'string',
                 'sanitize_callback' => [$this, 'sanitize_checkbox'],
-                'default' => 'yes',
+                'default' => $default,
             ]);
         }
-        foreach ([
-            'adoology_incomplete_timeout_minutes',
-            'adoology_incomplete_expire_days',
-            'adoology_fraud_rate_limit',
-            'adoology_duplicate_window_minutes',
-            'adoology_fraud_flag_threshold',
-            'adoology_fraud_hold_threshold',
-            'adoology_fraud_block_threshold',
-        ] as $option) {
+        $integer_sanitizers = [
+            'adoology_incomplete_timeout_minutes' => 'sanitize_timeout_minutes',
+            'adoology_incomplete_expire_days' => 'sanitize_expire_days',
+            'adoology_fraud_rate_limit' => 'sanitize_fraud_rate_limit',
+            'adoology_duplicate_window_minutes' => 'sanitize_duplicate_window_minutes',
+            'adoology_fraud_flag_threshold' => 'sanitize_risk_threshold',
+            'adoology_fraud_hold_threshold' => 'sanitize_risk_threshold',
+            'adoology_fraud_block_threshold' => 'sanitize_risk_threshold',
+        ];
+        foreach ($integer_sanitizers as $option => $sanitizer) {
             register_setting('adoology_features', $option, [
                 'type' => 'integer',
-                'sanitize_callback' => 'absint',
+                'sanitize_callback' => [$this, $sanitizer],
             ]);
         }
     }
@@ -185,6 +191,31 @@ class Settings
     public function sanitize_checkbox($value)
     {
         return $value === 'yes' ? 'yes' : 'no';
+    }
+
+    public function sanitize_timeout_minutes($value)
+    {
+        return min(1440, max(5, absint($value)));
+    }
+
+    public function sanitize_expire_days($value)
+    {
+        return min(90, max(1, absint($value)));
+    }
+
+    public function sanitize_fraud_rate_limit($value)
+    {
+        return min(100, max(2, absint($value)));
+    }
+
+    public function sanitize_duplicate_window_minutes($value)
+    {
+        return min(1440, max(5, absint($value)));
+    }
+
+    public function sanitize_risk_threshold($value)
+    {
+        return min(100, max(1, absint($value)));
     }
 
     /**
@@ -643,7 +674,8 @@ class Settings
 
     private function checkbox_row($option, $label)
     {
-        ?><tr><th scope="row"><?php echo esc_html($label); ?></th><td><label><input type="checkbox" name="<?php echo esc_attr($option); ?>" value="yes" <?php checked(Options::get($option, 'yes'), 'yes'); ?> /> <?php esc_html_e('Enabled', 'adoology-connector'); ?></label></td></tr><?php
+        $default = $option === 'adoology_tracking_enabled' ? 'no' : 'yes';
+        ?><tr><th scope="row"><?php echo esc_html($label); ?></th><td><label><input type="checkbox" name="<?php echo esc_attr($option); ?>" value="yes" <?php checked(Options::get($option, $default), 'yes'); ?> /> <?php esc_html_e('Enabled', 'adoology-connector'); ?></label></td></tr><?php
     }
 
     private function number_row($option, $label, $min, $max)

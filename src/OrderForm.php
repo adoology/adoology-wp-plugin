@@ -94,7 +94,7 @@ class OrderForm
             return current_user_can('edit_posts') ? '<p>' . esc_html__('Select a purchasable WooCommerce product for this Adoology order form.', 'adoology-connector') . '</p>' : '';
         }
 
-        IncompleteOrders::enqueue_tracker('order_form', [
+        $capture_context = IncompleteOrders::enqueue_tracker('order_form', [
             'currency' => get_woocommerce_currency(),
             'value_minor' => IncompleteOrders::to_minor($product->get_price()),
             'items' => [['product_id' => $product->get_id(), 'quantity' => 1]],
@@ -113,7 +113,7 @@ class OrderForm
         ob_start();
         self::styles();
         ?>
-        <form class="adoology-order-form" data-adoology-order-form="1" data-product-id="<?php echo esc_attr((string) $product->get_id()); ?>" data-value-minor="<?php echo esc_attr((string) IncompleteOrders::to_minor($product->get_price())); ?>" data-currency="<?php echo esc_attr(get_woocommerce_currency()); ?>" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+        <form class="adoology-order-form" data-adoology-order-form="1" data-adoology-capture-context="<?php echo esc_attr($capture_context['context']); ?>" data-adoology-capture-signature="<?php echo esc_attr($capture_context['signature']); ?>" data-product-id="<?php echo esc_attr((string) $product->get_id()); ?>" data-value-minor="<?php echo esc_attr((string) IncompleteOrders::to_minor($product->get_price())); ?>" data-currency="<?php echo esc_attr(get_woocommerce_currency()); ?>" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
             <input type="hidden" name="action" value="adoology_submit_order" />
             <input type="hidden" name="product_id" value="<?php echo esc_attr((string) $product->get_id()); ?>" />
             <input type="hidden" name="_adoology_checkout_id" value="" />
@@ -181,13 +181,25 @@ class OrderForm
             self::fail(__('Name, phone, address, and city are required.', 'adoology-connector'), $referer);
         }
 
+        $checkout_id = sanitize_text_field(wp_unslash($_POST['_adoology_checkout_id'] ?? ''));
+        if (!preg_match('/^[a-f0-9-]{36}$/Di', $checkout_id)) {
+            $checkout_id = self::fallback_checkout_id($nonce, $phone, $product_id);
+        }
+        $identity = IncompleteOrders::identity_for_checkout($checkout_id, [
+            'anonymous_id' => wp_unslash($_POST['_adoology_anonymous_id'] ?? ''),
+            'session_id' => wp_unslash($_POST['_adoology_session_id'] ?? ''),
+            'capture_token' => wp_unslash($_POST['_adoology_capture_token'] ?? ''),
+            'capture_context' => wp_unslash($_POST['_adoology_capture_context'] ?? ''),
+            'capture_signature' => wp_unslash($_POST['_adoology_capture_signature'] ?? ''),
+        ], $product_id);
+
         $risk = Fraud::enabled() ? Fraud::evaluate([
             'phone' => $phone,
             'email' => $email,
             'honeypot' => sanitize_text_field(wp_unslash($_POST['adoology_website'] ?? '')),
         ], [$product_id], true) : ['score' => 0, 'action' => 'allow', 'signals' => []];
         if ($risk['action'] === 'block') {
-            Events::enqueue('order.blocked', IncompleteOrders::anonymous_id(), IncompleteOrders::identity()['session_id'], [
+            Events::enqueue('order.blocked', $identity['anonymous_id'], $identity['session_id'], [
                 'product_id' => $product_id,
                 'risk_score' => $risk['score'],
                 'signals' => $risk['signals'],
@@ -195,11 +207,6 @@ class OrderForm
             self::fail(__('We could not accept this order. Please contact the store for assistance.', 'adoology-connector'), $referer);
         }
 
-        $checkout_id = sanitize_text_field(wp_unslash($_POST['_adoology_checkout_id'] ?? ''));
-        if (!preg_match('/^[a-f0-9-]{36}$/Di', $checkout_id)) {
-            $checkout_id = self::fallback_checkout_id($nonce, $phone, $product_id);
-        }
-        $identity = IncompleteOrders::identity();
         $snapshot = IncompleteOrders::store_snapshot($checkout_id, [
             'anonymous_id' => $identity['anonymous_id'],
             'session_id' => $identity['session_id'],
@@ -212,6 +219,7 @@ class OrderForm
             'landing_page' => $referer,
             'form_stage' => 'submitted',
             'customer' => compact('name', 'phone', 'email', 'address', 'city', 'postcode', 'country'),
+            'items' => [['product_id' => $product_id, 'variation_id' => $variation_id, 'quantity' => $quantity]],
         ]);
         if (is_wp_error($snapshot)) {
             self::fail(__('Could not prepare this order. Please try again.', 'adoology-connector'), $referer);

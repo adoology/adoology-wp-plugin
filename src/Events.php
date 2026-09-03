@@ -21,12 +21,14 @@ class Events
 
     const MAX_ATTEMPTS = 8;
 
+    const CONTINUATION_OPTION = 'adoology_events_continuation_state';
+
     /**
      * Register queue callbacks.
      */
     public static function register()
     {
-        add_action(self::PROCESS_HOOK, [self::class, 'process']);
+        add_action(self::PROCESS_HOOK, [self::class, 'process'], 10, 2);
         add_action(self::CLEANUP_HOOK, [self::class, 'cleanup']);
     }
 
@@ -103,7 +105,16 @@ class Events
     /**
      * Deliver one batch to Adoology.
      */
-    public static function process()
+    public static function process($kind = null, $continuation_token = '')
+    {
+        try {
+            self::process_batch($continuation_token);
+        } finally {
+            self::release_continuation($continuation_token);
+        }
+    }
+
+    private static function process_batch($continuation_token)
     {
         global $wpdb;
 
@@ -166,7 +177,7 @@ class Events
                     self::mark_failed((int) $row['id'], (int) $row['attempts'], $result->get_error_message(), $lease_token);
                 }
             }
-            self::schedule_processing(time() + 60);
+            self::schedule_processing(time() + 60, true, $continuation_token);
 
             return;
         }
@@ -177,7 +188,7 @@ class Events
             array_merge([$now, $now], $ids, [$lease_token])
         );
         $wpdb->query($query);
-        self::schedule_processing(time() + 1);
+        self::schedule_processing(time() + 1, true, $continuation_token);
     }
 
     /**
@@ -188,7 +199,7 @@ class Events
         global $wpdb;
 
         $table = Database::events_table();
-        $retention = max(1, (int) Options::get('adoology_incomplete_expire_days', 7));
+        $retention = min(90, max(1, (int) Options::get('adoology_incomplete_expire_days', 7)));
         $wpdb->query($wpdb->prepare(
             "DELETE FROM {$table} WHERE status IN ('pending','retrying','processing','failed') AND created_at < %s",
             gmdate('Y-m-d H:i:s', time() - $retention * DAY_IN_SECONDS)
@@ -208,10 +219,59 @@ class Events
      * Queue processing through Action Scheduler or WP-Cron.
      *
      * @param  int|null  $timestamp  Optional run timestamp.
+     * @param  bool  $continuation  Schedule behind the currently running action.
+     * @param  string  $current_token  Current continuation owner.
      */
-    public static function schedule_processing($timestamp = null)
+    public static function schedule_processing($timestamp = null, $continuation = false, $current_token = '')
     {
-        Scheduler::schedule_single($timestamp ?: time() + 1, self::PROCESS_HOOK, ['async']);
+        $run_at = $timestamp ?: time() + 1;
+        if (!$continuation) {
+            Scheduler::schedule_single($run_at, self::PROCESS_HOOK, ['async']);
+
+            return;
+        }
+
+        $token = self::claim_continuation($current_token);
+        if ($token === '') {
+            return;
+        }
+        $scheduled = Scheduler::schedule_single($run_at, self::PROCESS_HOOK, ['continuation', $token]);
+        if (is_wp_error($scheduled)) {
+            self::release_continuation($token);
+        }
+    }
+
+    private static function claim_continuation($current_token)
+    {
+        $state = Options::get(self::CONTINUATION_OPTION, []);
+        if ($current_token !== '') {
+            if (!is_array($state) || !isset($state['token']) || !hash_equals((string) $state['token'], (string) $current_token)) {
+                return '';
+            }
+        } else {
+            if (is_array($state) && isset($state['created_at']) && time() - (int) $state['created_at'] >= 10 * MINUTE_IN_SECONDS) {
+                Options::delete(self::CONTINUATION_OPTION);
+            }
+            $token = wp_generate_uuid4();
+            if (!add_option(self::CONTINUATION_OPTION, ['token' => $token, 'created_at' => time()], '', false)) {
+                return '';
+            }
+
+            return $token;
+        }
+
+        $token = wp_generate_uuid4();
+        Options::update(self::CONTINUATION_OPTION, ['token' => $token, 'created_at' => time()]);
+
+        return $token;
+    }
+
+    private static function release_continuation($token)
+    {
+        $state = Options::get(self::CONTINUATION_OPTION, []);
+        if ($token !== '' && is_array($state) && isset($state['token']) && hash_equals((string) $state['token'], (string) $token)) {
+            Options::delete(self::CONTINUATION_OPTION);
+        }
     }
 
     /**

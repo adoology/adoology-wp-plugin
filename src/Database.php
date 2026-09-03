@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 
 class Database
 {
-    const VERSION = '1.1.0';
+    const VERSION = '1.3.0';
 
     /**
      * Install or upgrade plugin tables.
@@ -45,7 +45,8 @@ class Database
             UNIQUE KEY event_id (event_id),
             KEY delivery (status,available_at),
             KEY lease (lease_token,lease_expires_at),
-            KEY event_name (event_name,created_at)
+            KEY event_name (event_name,created_at),
+            KEY anonymous_id (anonymous_id)
         ) {$charset_collate};");
 
         dbDelta("CREATE TABLE {$incomplete} (
@@ -74,6 +75,11 @@ class Database
             KEY order_id (order_id),
             KEY expires_at (expires_at)
         ) {$charset_collate};");
+
+        $retention_index = $wpdb->get_var($wpdb->prepare("SHOW INDEX FROM {$incomplete} WHERE Key_name = %s", 'retention'));
+        if (!$retention_index) {
+            $wpdb->query("ALTER TABLE {$incomplete} ADD KEY retention (status, updated_at)");
+        }
 
         Options::update('adoology_db_version', self::VERSION);
     }

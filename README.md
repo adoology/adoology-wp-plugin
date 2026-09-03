@@ -230,7 +230,7 @@ Default values are installed when the plugin activates.
 | Setting | Option | Default | Admin range or behavior |
 | --- | --- | --- | --- |
 | API URL | `adoology_api_base_url` | `https://api.adoology.com` | Public HTTPS origin; no `/v1` suffix |
-| Incomplete-order tracking | `adoology_tracking_enabled` | Enabled | Disable if required by privacy or consent policy |
+| Incomplete-order tracking | `adoology_tracking_enabled` | Disabled | Enable after configuring required privacy notice and consent |
 | Mark incomplete after | `adoology_incomplete_timeout_minutes` | 30 minutes | 5 to 1,440 minutes |
 | Incomplete data expiry | `adoology_incomplete_expire_days` | 7 days | 1 to 90 days |
 | Fraud protection | `adoology_fraud_enabled` | Enabled | Covers classic, Store API, and order-form flows |
@@ -277,7 +277,7 @@ The backend queue worker must consume `channel-sync`; otherwise connections rema
 
 ## Incomplete-order tracking
 
-Incomplete-order tracking is enabled by default. The plugin tracks classic checkout, WooCommerce Checkout Blocks, and the Adoology order form unless a merchant disables it in settings.
+Incomplete-order tracking is disabled by default. After a merchant enables it, the plugin tracks classic checkout, WooCommerce Checkout Blocks, and the Adoology order form.
 
 ### Lifecycle
 
@@ -306,7 +306,7 @@ When tracking is enabled, snapshots can include:
 
 Customer snapshot payloads and event payloads are encrypted locally with AES-256-GCM.
 
-Tracking uses same-origin REST requests and a two-hour signed capture token bound to random browser identifiers. Requests are limited to 60 per IP per minute and 300 new local checkout rows globally per minute.
+Tracking uses same-origin REST requests, signed page context, and a two-hour capture token bound to server-issued browser and session identifiers. Cart products, quantities, totals, and currency are resolved from WooCommerce server state. Capture requests are limited to 60 per browser identity per minute and 300 requests globally per minute; deployments can add edge checks through `adoology_allow_capture_request`.
 
 The browser uses these same-site identifier cookies:
 
@@ -507,7 +507,7 @@ Tokens, secrets, signatures, API keys, bearer credentials, and Woo consumer cred
 
 ## Privacy and data retention
 
-Incomplete-order tracking is enabled by default. Merchants are responsible for updating their privacy policy, obtaining consent required by their jurisdiction, or disabling tracking before accepting traffic.
+Incomplete-order tracking is disabled by default. Merchants must update their privacy policy and obtain any required consent before enabling it.
 
 The plugin adds suggested text under WordPress's privacy-policy guide and registers:
 
@@ -519,8 +519,8 @@ The local eraser deletes matching encrypted checkout rows and locally queued eve
 ### Retention behavior
 
 - Active incomplete rows expire after the configured number of days.
-- Expired rows have encrypted customer data cleared.
-- Converted, recovered, and expired rows have customer data cleared after the configured retention interval.
+- Expired rows are deleted with all checkout identifiers and metadata.
+- Converted and recovered rows are deleted after the configured retention interval.
 - Unsent and failed event rows older than the configured incomplete-data retention are deleted.
 - Sent event rows are deleted after seven days.
 - Failed event payloads older than 30 days are blanked; normal cleanup usually deletes them earlier when retention is shorter.
@@ -564,7 +564,7 @@ The plugin creates two site-prefixed tables:
 | `{prefix}adoology_events` | Encrypted durable event outbox, delivery attempts, leases, and errors |
 | `{prefix}adoology_incomplete_orders` | Checkout lifecycle, encrypted customer snapshot, product/value context, risk score, and order correlation |
 
-Schema version is `1.1.0`. `dbDelta()` runs during activation and when a schema version mismatch is detected.
+Schema version is `1.2.0`. `dbDelta()` runs during activation and when a schema version mismatch is detected.
 
 ### WooCommerce order metadata
 
@@ -623,10 +623,9 @@ Use **Adoology > Connection > Disconnect** before deactivation or deletion.
 Disconnect performs these actions:
 
 1. Requests deletion of the backend channel connection with an idempotency key.
-2. Backend removes managed WooCommerce webhooks.
-3. Backend calls the signed local revocation endpoint.
-4. Plugin removes the exact WooCommerce API key using key ID and consumer-key hash.
-5. Plugin clears connection state, webhook secret, workspace API key, and legacy artifacts.
+2. Backend removes managed WooCommerce webhooks and calls the signed local revocation endpoint.
+3. Plugin synchronously removes locally identifiable Adoology webhooks and API keys as a fallback.
+4. Plugin clears connection state, webhook secret, workspace API key, and legacy artifacts.
 
 Short-lived revocation signing material is retained for safe backend retries and expires after one day.
 
@@ -636,9 +635,9 @@ Deactivation stops plugin cron hooks. It does not disconnect the store, delete d
 
 ### Uninstall
 
-Uninstall attempts a bounded remote disconnect, clears schedules and plugin options, removes legacy managed Woo webhooks/API keys, and drops both plugin tables.
+Uninstall attempts a bounded remote disconnect, synchronously removes locally identifiable Adoology webhooks/API keys, clears both WP-Cron and Action Scheduler work, removes plugin options, and drops both plugin tables.
 
-If the backend cannot be reached, API URL, workspace key, connection ID, and disconnect idempotency state are preserved for possible recovery after reinstall. Because an inactive plugin cannot receive an asynchronous key-revocation callback, disconnect before uninstalling.
+If the backend cannot be reached, API URL, workspace key, connection ID, and disconnect idempotency state are preserved for possible recovery after reinstall. Local WooCommerce credentials are still revoked.
 
 ## Troubleshooting
 

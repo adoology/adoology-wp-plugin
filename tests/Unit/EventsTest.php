@@ -10,6 +10,8 @@ use Adoology\Events;
 use Adoology\Tests\TestCase;
 use ReflectionMethod;
 
+use function Brain\Monkey\Functions\when;
+
 /**
  * @coversDefaultClass \Adoology\Events
  */
@@ -82,6 +84,60 @@ class EventsTest extends TestCase
         $this->assertSame(7, $this->invoke('sanitize_value', 7, 0));
         $this->assertNull($this->invoke('sanitize_value', null, 0));
         $this->assertSame(1.5, $this->invoke('sanitize_value', 1.5, 0));
+    }
+
+    /**
+     * @covers ::schedule_processing
+     */
+    public function test_continuations_use_unique_action_arguments()
+    {
+        /** @var list<array<mixed>> $scheduled */
+        $scheduled = [];
+        /** @var array<string, mixed> $options */
+        $options = [];
+        $sequence = 0;
+        when('get_option')->alias(function ($name, $default = false) use (&$options) {
+            return array_key_exists($name, $options) ? $options[$name] : $default;
+        });
+        when('add_option')->alias(function ($name, $value) use (&$options) {
+            if (array_key_exists($name, $options)) {
+                return false;
+            }
+            $options[$name] = $value;
+
+            return true;
+        });
+        when('update_option')->alias(function ($name, $value) use (&$options) {
+            $options[$name] = $value;
+
+            return true;
+        });
+        when('delete_option')->alias(function ($name) use (&$options) {
+            unset($options[$name]);
+
+            return true;
+        });
+        when('wp_generate_uuid4')->alias(function () use (&$sequence) {
+            $sequence++;
+
+            return 'uuid-' . $sequence;
+        });
+        when('wp_next_scheduled')->alias(function ($hook, $args) use (&$scheduled) {
+            return in_array($args, $scheduled, true) ? time() + 10 : false;
+        });
+        when('wp_schedule_single_event')->alias(function ($timestamp, $hook, $args) use (&$scheduled) {
+            $scheduled[] = $args;
+
+            return true;
+        });
+
+        $run_at = time() + 10;
+        Events::schedule_processing($run_at, true);
+        Events::schedule_processing($run_at, true);
+
+        $this->assertSame([
+            ['continuation', 'uuid-1'],
+        ], $scheduled);
     }
 
     private function invoke($method, ...$args)

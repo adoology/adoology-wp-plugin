@@ -54,7 +54,7 @@ class ConnectionTest extends TestCase
     public function test_connect_restores_existing_backend_connection_information()
     {
         /** @var array<string, mixed> $options */
-        $options = [];
+        $options = ['adoology_connection_id' => '01ARZ3NDEKTSV4RRFFQ69G5FAV'];
         when('__')->returnArg();
         when('wp_salt')->justReturn('test-auth-secret');
         when('get_current_blog_id')->justReturn(1);
@@ -90,6 +90,7 @@ class ConnectionTest extends TestCase
         when('wp_safe_remote_request')->alias(function ($url, $arguments) {
             $this->assertSame('https://api.adoology.com/v1/channel-connections', $url);
             $this->assertSame('POST', $arguments['method']);
+            $this->assertSame('01ARZ3NDEKTSV4RRFFQ69G5FAV', json_decode($arguments['body'], true)['existing_connection_id']);
 
             return [
                 'response' => ['code' => 200],
@@ -106,7 +107,10 @@ class ConnectionTest extends TestCase
                             'error_count' => 0,
                         ],
                     ],
-                    'meta' => ['existing' => true],
+                    'meta' => [
+                        'existing' => true,
+                        'webhook_secret' => str_repeat('a', 64),
+                    ],
                 ]),
             ];
         });
@@ -117,6 +121,7 @@ class ConnectionTest extends TestCase
         $this->assertTrue(Crypto::set_secret('adoology_api_token', 'dc_workspace-token'));
         $this->assertTrue(Connection::connect());
         $this->assertSame('01ARZ3NDEKTSV4RRFFQ69G5FAV', Options::get('adoology_connection_id'));
+        $this->assertSame(str_repeat('a', 64), Crypto::get_secret('adoology_webhook_secret'));
         $this->assertSame([
             'status' => 'active',
             'checked_at' => gmdate('Y-m-d H:i:s'),

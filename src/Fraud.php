@@ -171,7 +171,7 @@ class Fraud
         }
 
         $attempts = self::attempt_count($count_attempt);
-        $limit = max(2, (int) Options::get('adoology_fraud_rate_limit', 5));
+        $limit = min(100, max(2, (int) Options::get('adoology_fraud_rate_limit', 5)));
         if ($attempts > $limit) {
             $score += min(50, 15 + ($attempts - $limit) * 5);
             $signals[] = 'ip_velocity';
@@ -183,9 +183,9 @@ class Fraud
         }
 
         $score = min(100, $score);
-        $flag = max(1, (int) Options::get('adoology_fraud_flag_threshold', 30));
-        $hold = max($flag, (int) Options::get('adoology_fraud_hold_threshold', 60));
-        $block = max($hold, (int) Options::get('adoology_fraud_block_threshold', 90));
+        $flag = min(100, max(1, (int) Options::get('adoology_fraud_flag_threshold', 30)));
+        $hold = min(100, max($flag, (int) Options::get('adoology_fraud_hold_threshold', 60)));
+        $block = min(100, max($hold, (int) Options::get('adoology_fraud_block_threshold', 90)));
         $action = $score >= $block ? 'block' : ($score >= $hold ? 'hold' : ($score >= $flag ? 'flag' : 'allow'));
 
         return [
@@ -242,7 +242,8 @@ class Fraud
             $order->add_order_note(__('Flagged by Adoology local risk assessment.', 'adoology-connector'));
         }
 
-        $queued = Events::enqueue('risk.assessed', IncompleteOrders::anonymous_id(), IncompleteOrders::identity()['session_id'], [
+        $identity = IncompleteOrders::identity_for_checkout((string) $order->get_meta('_adoology_checkout_id', true));
+        $queued = Events::enqueue('risk.assessed', $identity['anonymous_id'], $identity['session_id'], [
             'order_id' => $order->get_id(),
             'risk_score' => $score,
             'action' => $action ?: 'allow',
@@ -256,8 +257,8 @@ class Fraud
 
     private static function attempt_count($increment)
     {
-        $ip = IncompleteOrders::client_ip();
-        $key = 'adoology_attempt_' . hash_hmac('sha256', $ip, wp_salt('nonce'));
+        $subject = IncompleteOrders::client_identifier();
+        $key = 'adoology_attempt_' . hash_hmac('sha256', $subject, wp_salt('nonce'));
         $count = (int) get_transient($key);
         if ($increment) {
             $count++;
@@ -272,7 +273,7 @@ class Fraud
         if (!function_exists('wc_get_orders')) {
             return false;
         }
-        $minutes = max(5, (int) Options::get('adoology_duplicate_window_minutes', 60));
+        $minutes = min(1440, max(5, (int) Options::get('adoology_duplicate_window_minutes', 60)));
         $base_args = [
             'limit' => 10,
             'return' => 'objects',

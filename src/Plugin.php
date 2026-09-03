@@ -84,13 +84,17 @@ final class Plugin
      */
     public static function deactivate()
     {
-        wp_clear_scheduled_hook(Connection::HEALTH_HOOK);
-        wp_clear_scheduled_hook(Events::PROCESS_HOOK);
-        wp_clear_scheduled_hook(Events::CLEANUP_HOOK);
-        wp_clear_scheduled_hook(IncompleteOrders::LIFECYCLE_HOOK);
-        foreach (self::LEGACY_HOOKS as $legacy_hook) {
-            Scheduler::unschedule_hook($legacy_hook);
+        $hooks = [
+            Connection::HEALTH_HOOK,
+            Events::PROCESS_HOOK,
+            Events::CLEANUP_HOOK,
+            IncompleteOrders::LIFECYCLE_HOOK,
+        ];
+        foreach (array_merge($hooks, self::LEGACY_HOOKS) as $hook) {
+            Scheduler::unschedule_hook($hook);
         }
+        Options::delete(Events::CONTINUATION_OPTION);
+        Options::delete(IncompleteOrders::CONTINUATION_OPTION);
     }
 
     /**

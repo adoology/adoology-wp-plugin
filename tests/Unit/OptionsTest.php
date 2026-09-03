@@ -7,7 +7,9 @@
 namespace Adoology\Tests\Unit;
 
 use Adoology\Options;
+use Adoology\Settings;
 use Adoology\Tests\TestCase;
+use ReflectionClass;
 
 use function Brain\Monkey\Functions\expect;
 use function Brain\Monkey\Functions\when;
@@ -67,7 +69,7 @@ class OptionsTest extends TestCase
         Options::install_defaults();
 
         $this->assertSame('https://api.adoology.com', $options['adoology_api_base_url']);
-        $this->assertSame('yes', $options['adoology_tracking_enabled']);
+        $this->assertSame('no', $options['adoology_tracking_enabled']);
         $this->assertSame(30, $options['adoology_incomplete_timeout_minutes']);
         $this->assertArrayNotHasKey('adoology_inbound_secret', $options);
     }
@@ -82,5 +84,17 @@ class OptionsTest extends TestCase
         $this->assertContains('adoology_api_token', $names);
         $this->assertContains('adoology_webhook_secret', $names);
         $this->assertContains('adoology_connection_id', $names);
+    }
+
+    public function test_feature_integer_sanitizers_enforce_documented_ranges()
+    {
+        $settings = (new ReflectionClass(Settings::class))->newInstanceWithoutConstructor();
+
+        $this->assertSame(5, $settings->sanitize_timeout_minutes(0));
+        $this->assertSame(1440, $settings->sanitize_timeout_minutes(9999));
+        $this->assertSame(1, $settings->sanitize_expire_days(0));
+        $this->assertSame(90, $settings->sanitize_expire_days(9999));
+        $this->assertSame(2, $settings->sanitize_fraud_rate_limit(0));
+        $this->assertSame(100, $settings->sanitize_risk_threshold(9999));
     }
 }

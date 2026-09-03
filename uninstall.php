@@ -7,13 +7,13 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
     exit;
 }
 
-if (!is_readable(__DIR__ . '/vendor/autoload.php')) {
-    exit;
+if (is_readable(__DIR__ . '/vendor/autoload.php')) {
+    require_once __DIR__ . '/vendor/autoload.php';
 }
 
-require_once __DIR__ . '/vendor/autoload.php';
-
 use Adoology\ApiClient;
+use Adoology\Connection;
+use Adoology\Scheduler;
 
 /**
  * Uninstall plugin data for current site.
@@ -22,9 +22,9 @@ function adoology_uninstall_site()
 {
     global $wpdb;
 
-    $preserve_remote_state = false;
     $connection_id = (string) get_option('adoology_connection_id', '');
-    if (preg_match('/^[0-9A-HJKMNP-TV-Z]{26}$/Di', $connection_id)) {
+    $preserve_remote_state = $connection_id !== '' && !class_exists(ApiClient::class);
+    if (class_exists(ApiClient::class) && preg_match('/^[0-9A-HJKMNP-TV-Z]{26}$/Di', $connection_id)) {
         $remote_result = ApiClient::delete_connection(
             $connection_id,
             ApiClient::new_idempotency_key(),
@@ -33,41 +33,56 @@ function adoology_uninstall_site()
         $preserve_remote_state = is_wp_error($remote_result) && ApiClient::error_status($remote_result) !== 404;
     }
 
-    foreach ((array) get_option('adoology_wc_webhook_ids', []) as $webhook_id) {
-        $webhook_id = (int) $webhook_id;
-        if ($webhook_id <= 0) {
-            continue;
-        }
-        if (function_exists('wc_get_webhook')) {
-            $webhook = wc_get_webhook($webhook_id);
-            if ($webhook && strpos((string) $webhook->get_name(), 'Adoology: ') === 0) {
-                $webhook->delete(true);
+    if (class_exists(Connection::class)) {
+        Connection::delete_managed_woocommerce_credentials();
+    } else {
+        $webhook_table = $wpdb->prefix . 'wc_webhooks';
+        $key_table = $wpdb->prefix . 'woocommerce_api_keys';
+        $webhooks = $wpdb->get_results($wpdb->prepare(
+            "SELECT webhook_id, name FROM {$webhook_table} WHERE name LIKE %s OR name LIKE %s",
+            $wpdb->esc_like('Adoology ') . '%',
+            $wpdb->esc_like('Adoology: ') . '%'
+        ), ARRAY_A);
+        $webhook_names = [
+            'Adoology customer.created', 'Adoology customer.deleted', 'Adoology customer.updated',
+            'Adoology order.created', 'Adoology order.deleted', 'Adoology order.updated',
+            'Adoology product.created', 'Adoology product.deleted', 'Adoology product.updated',
+            'Adoology: customer.created', 'Adoology: customer.deleted', 'Adoology: customer.updated',
+            'Adoology: order.created', 'Adoology: order.deleted', 'Adoology: order.updated',
+            'Adoology: product.created', 'Adoology: product.deleted', 'Adoology: product.updated',
+        ];
+        foreach ($webhooks as $webhook) {
+            if (in_array((string) $webhook['name'], $webhook_names, true)) {
+                $wpdb->delete($webhook_table, ['webhook_id' => (int) $webhook['webhook_id'], 'name' => $webhook['name']], ['%d', '%s']);
             }
-
-            continue;
         }
-
-        $table = $wpdb->prefix . 'wc_webhooks';
-        $name = $wpdb->get_var($wpdb->prepare("SELECT name FROM {$table} WHERE webhook_id = %d", $webhook_id));
-        if (is_string($name) && strpos($name, 'Adoology: ') === 0) {
-            $wpdb->delete($table, ['webhook_id' => $webhook_id], ['%d']);
+        $keys = $wpdb->get_results($wpdb->prepare(
+            "SELECT key_id, description FROM {$key_table} WHERE description = %s OR description LIKE %s OR description LIKE %s",
+            'Adoology Connector',
+            $wpdb->esc_like('Adoology Connector ') . '%',
+            $wpdb->esc_like('Adoology - API (') . '%'
+        ), ARRAY_A);
+        foreach ($keys as $key) {
+            $description = (string) $key['description'];
+            $managed = $description === 'Adoology Connector' ||
+                (bool) preg_match('/^Adoology Connector [0-9A-HJKMNP-TV-Z]{26}$/D', $description) ||
+                (bool) preg_match('/^Adoology - API \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\)$/D', $description);
+            if ($managed) {
+                $wpdb->delete($key_table, ['key_id' => (int) $key['key_id'], 'description' => $description], ['%d', '%s']);
+            }
         }
     }
 
-    $key_id = (int) get_option('adoology_wc_api_key_id', 0);
-    if ($key_id > 0) {
-        $wpdb->delete(
-            $wpdb->prefix . 'woocommerce_api_keys',
-            ['key_id' => $key_id, 'description' => 'Adoology Connector'],
-            ['%d', '%s']
-        );
+    foreach (['adoology_connection_health_check', 'adoology_webhook_retry', 'adoology_process_events', 'adoology_cleanup_events', 'adoology_incomplete_order_lifecycle'] as $hook) {
+        if (class_exists(Scheduler::class)) {
+            Scheduler::unschedule_hook($hook);
+        } else {
+            if (function_exists('as_unschedule_all_actions')) {
+                as_unschedule_all_actions($hook);
+            }
+            wp_clear_scheduled_hook($hook);
+        }
     }
-
-    wp_clear_scheduled_hook('adoology_connection_health_check');
-    wp_clear_scheduled_hook('adoology_webhook_retry');
-    wp_clear_scheduled_hook('adoology_process_events');
-    wp_clear_scheduled_hook('adoology_cleanup_events');
-    wp_clear_scheduled_hook('adoology_incomplete_order_lifecycle');
 
     $preserved = [
         'adoology_api_base_url',
@@ -113,6 +128,8 @@ function adoology_uninstall_site()
         'adoology_pending_revoke_connection_id',
         'adoology_pending_revoke_secret',
         'adoology_pending_revoke_created_at',
+        'adoology_events_continuation_state',
+        'adoology_lifecycle_continuation_state',
     ];
 
     foreach ($options as $option) {

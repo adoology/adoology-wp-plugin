@@ -6,8 +6,12 @@
     }
 
     var config = window.adoologyCheckout;
-    var identity = null;
+    if (!config.trackingEnabled) {
+        return;
+    }
     var timers = new WeakMap();
+    var states = new WeakMap();
+    var identityPromises = {};
 
     function field(form, names) {
         for (var i = 0; i < names.length; i++) {
@@ -19,58 +23,80 @@
         return '';
     }
 
-    function persistIdentity(value) {
-        identity = value;
-        try {
-            window.sessionStorage.setItem('adoologyCheckoutIdentity', JSON.stringify(value));
-        } catch (error) {}
-        document.cookie = 'adoology_anonymous_id=' + encodeURIComponent(value.anonymous_id) + ';path=/;SameSite=Lax';
-        document.cookie = 'adoology_checkout_id=' + encodeURIComponent(value.checkout_id) + ';path=/;SameSite=Lax';
+    function contextFor(form) {
+        return {
+            context: form.dataset.adoologyCaptureContext || config.captureContext || '',
+            signature: form.dataset.adoologyCaptureSignature || config.captureSignature || '',
+            orderForm: !!form.dataset.adoologyOrderForm
+        };
     }
 
-    function loadIdentity() {
+    function persistIdentity(value, context) {
         try {
-            var stored = JSON.parse(window.sessionStorage.getItem('adoologyCheckoutIdentity') || 'null');
-            if (stored && stored.expires > Math.floor(Date.now() / 1000) + 60 && stored.token) {
-                persistIdentity(stored);
+            window.sessionStorage.setItem('adoologyCheckoutIdentity:' + context.signature, JSON.stringify(value));
+        } catch (error) {}
+        if (!context.orderForm) {
+            var secure = window.location.protocol === 'https:' ? ';Secure' : '';
+            document.cookie = 'adoology_anonymous_id=' + encodeURIComponent(value.anonymous_id) + ';path=/;SameSite=Lax' + secure;
+            document.cookie = 'adoology_checkout_id=' + encodeURIComponent(value.checkout_id) + ';path=/;SameSite=Lax' + secure;
+        }
+    }
+
+    function loadIdentity(context) {
+        if (!context.context || !context.signature) {
+            return Promise.reject(new Error('Checkout context missing'));
+        }
+        if (identityPromises[context.signature]) {
+            return identityPromises[context.signature];
+        }
+        try {
+            var stored = JSON.parse(window.sessionStorage.getItem('adoologyCheckoutIdentity:' + context.signature) || 'null');
+            if (stored && stored.expires > Math.floor(Date.now() / 1000) + 60 && stored.token && stored.capture_context === context.context) {
+                persistIdentity(stored, context);
                 return Promise.resolve(stored);
             }
         } catch (error) {}
 
-        return window.fetch(config.tokenEndpoint, {
+        identityPromises[context.signature] = window.fetch(config.tokenEndpoint, {
             method: 'POST',
             credentials: 'same-origin',
-            headers: { 'Accept': 'application/json' }
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                capture_context: context.context,
+                capture_signature: context.signature
+            })
         }).then(function (response) {
             if (!response.ok) {
                 throw new Error('Checkout token rejected');
             }
             return response.json();
         }).then(function (value) {
-            persistIdentity(value);
+            value.capture_context = context.context;
+            persistIdentity(value, context);
             return value;
+        }).catch(function (error) {
+            delete identityPromises[context.signature];
+            throw error;
         });
+
+        return identityPromises[context.signature];
     }
 
     function snapshot(form, stage) {
-        if (!identity || !config.trackingEnabled) {
+        var state = states.get(form);
+        if (!state || !config.trackingEnabled) {
             return;
         }
-        var flowData = form.dataset.adoologyOrderForm ? form.dataset : {};
-        var data = config.data || {};
+        var identity = state.identity;
         var payload = {
             checkout_id: identity.checkout_id,
             anonymous_id: identity.anonymous_id,
             session_id: identity.session_id,
             capture_token: identity.token,
-            flow: form.dataset.adoologyOrderForm ? 'order_form' : config.flow,
-            product_id: parseInt(flowData.productId || 0, 10),
+            capture_context: state.context.context,
+            capture_signature: state.context.signature,
             variation_id: parseInt(field(form, ['variation_id']) || 0, 10),
             quantity: parseInt(field(form, ['quantity']) || 1, 10),
-            value_minor: parseInt(flowData.valueMinor || data.value_minor || 0, 10),
-            currency: flowData.currency || data.currency || '',
-            items: data.items || [],
-            landing_page: config.landingPage,
             form_stage: stage,
             customer: {
                 anonymous_id: identity.anonymous_id,
@@ -98,23 +124,44 @@
         timers.set(form, window.setTimeout(function () { snapshot(form, 'details'); }, delay));
     }
 
+    function setHidden(form, name, value) {
+        var input = form.querySelector('[name="' + name + '"]');
+        if (!input) {
+            input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = name;
+            form.appendChild(input);
+        }
+        input.value = value;
+    }
+
     function bind(form) {
         if (!form || form.dataset.adoologyTrackerBound) {
             return;
         }
-        form.dataset.adoologyTrackerBound = '1';
-        var checkoutInput = form.querySelector('[name="_adoology_checkout_id"]');
-        if (!checkoutInput) {
-            checkoutInput = document.createElement('input');
-            checkoutInput.type = 'hidden';
-            checkoutInput.name = '_adoology_checkout_id';
-            form.appendChild(checkoutInput);
-        }
-        checkoutInput.value = identity.checkout_id;
-        form.addEventListener('input', function () { queueSnapshot(form, 1200); });
-        form.addEventListener('change', function () { queueSnapshot(form, 300); });
-        snapshot(form, 'started');
-        window.addEventListener('pagehide', function () { snapshot(form, 'leaving'); });
+        form.dataset.adoologyTrackerBound = 'pending';
+        var context = contextFor(form);
+        loadIdentity(context).then(function (identity) {
+            states.set(form, { identity: identity, context: context });
+            form.dataset.adoologyTrackerBound = '1';
+            setHidden(form, '_adoology_checkout_id', identity.checkout_id);
+            if (context.orderForm) {
+                setHidden(form, '_adoology_anonymous_id', identity.anonymous_id);
+                setHidden(form, '_adoology_session_id', identity.session_id);
+                setHidden(form, '_adoology_capture_token', identity.token);
+                setHidden(form, '_adoology_capture_context', context.context);
+                setHidden(form, '_adoology_capture_signature', context.signature);
+            }
+            form.addEventListener('input', function () { queueSnapshot(form, 1200); });
+            form.addEventListener('change', function () { queueSnapshot(form, 300); });
+            snapshot(form, 'started');
+            window.addEventListener('pagehide', function () { snapshot(form, 'leaving'); });
+            if (!form.dataset.adoologyOrderForm) {
+                setBlocksExtensionData(identity);
+            }
+        }).catch(function () {
+            delete form.dataset.adoologyTrackerBound;
+        });
     }
 
     function bindForms() {
@@ -122,8 +169,8 @@
         document.querySelectorAll(selectors).forEach(bind);
     }
 
-    function setBlocksExtensionData() {
-        if (!identity || !window.wp || !window.wp.data || !window.wc || !window.wc.wcBlocksData) {
+    function setBlocksExtensionData(identity) {
+        if (!window.wp || !window.wp.data || !window.wc || !window.wc.wcBlocksData) {
             return;
         }
         var checkoutStore = window.wp.data.dispatch(window.wc.wcBlocksData.CHECKOUT_STORE_KEY);
@@ -133,11 +180,8 @@
     }
 
     function initialize() {
-        loadIdentity().then(function () {
-            setBlocksExtensionData();
-            bindForms();
-            new MutationObserver(bindForms).observe(document.body, { childList: true, subtree: true });
-        }).catch(function () {});
+        bindForms();
+        new MutationObserver(bindForms).observe(document.body, { childList: true, subtree: true });
     }
 
     if (document.readyState === 'loading') {

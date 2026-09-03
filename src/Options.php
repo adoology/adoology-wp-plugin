@@ -65,7 +65,7 @@ class Options
             'adoology_product_auto_sync' => 'yes',
             'adoology_inventory_auto_sync' => 'yes',
             'adoology_channel_product_add_sync' => 'yes',
-            'adoology_tracking_enabled' => 'yes',
+            'adoology_tracking_enabled' => 'no',
             'adoology_incomplete_timeout_minutes' => 30,
             'adoology_incomplete_expire_days' => 7,
             'adoology_fraud_enabled' => 'yes',
@@ -136,6 +136,8 @@ class Options
             'adoology_pending_revoke_connection_id',
             'adoology_pending_revoke_secret',
             'adoology_pending_revoke_created_at',
+            'adoology_events_continuation_state',
+            'adoology_lifecycle_continuation_state',
             'adoology_inbound_secret',
             'adoology_stock_subscription_state',
         ];
