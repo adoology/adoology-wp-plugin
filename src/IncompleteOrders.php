@@ -740,14 +740,7 @@ class IncompleteOrders
      */
     private static function contact_payload($payload, $checkout_id)
     {
-        if ($payload === '') {
-            return [];
-        }
-        $decrypted = Crypto::decrypt($payload, 'adoology_checkout_' . $checkout_id);
-        $data = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
-        if (!is_array($data)) {
-            return [];
-        }
+        $data = self::customer_payload($payload, $checkout_id);
         $contact = [];
         foreach (['name', 'phone', 'email', 'address', 'city', 'postcode', 'country'] as $field) {
             if (isset($data[$field]) && is_string($data[$field]) && $data[$field] !== '') {
@@ -768,6 +761,7 @@ class IncompleteOrders
     {
         $product_id = (int) ($row['product_id'] ?? 0);
         $variation_id = (int) ($row['variation_id'] ?? 0);
+        $customer = self::customer_payload((string) ($row['customer_data'] ?? ''), $row['checkout_id']);
         $properties = [
             'checkout_id' => $row['checkout_id'],
             'flow' => $row['flow'],
@@ -777,18 +771,77 @@ class IncompleteOrders
             'value_minor' => (int) $row['value_minor'],
             'currency' => $row['currency'],
             'form_stage' => $row['form_stage'],
-            'customer' => self::contact_payload((string) ($row['customer_data'] ?? ''), $row['checkout_id']),
+            'customer' => self::public_customer($customer),
         ];
-        $product = wc_get_product($variation_id ?: $product_id);
-        if ($product) {
-            $product_name = sanitize_text_field((string) $product->get_name());
-            $product_name = function_exists('mb_substr') ? mb_substr($product_name, 0, 190) : substr($product_name, 0, 190);
-            if ($product_name !== '') {
-                $properties['product_name'] = $product_name;
-            }
+        $product_name = self::product_name($product_id, $variation_id);
+        if ($product_name !== '') {
+            $properties['product_name'] = $product_name;
+        }
+        $items = self::event_items($customer['items'] ?? []);
+        if ($items !== []) {
+            $properties['items'] = $items;
         }
 
         return $properties;
+    }
+
+    /**
+     * Decrypt one stored checkout customer payload.
+     *
+     * @param  string  $payload  Encrypted customer data.
+     * @param  string  $checkout_id  Checkout UUID.
+     * @return array
+     */
+    private static function customer_payload($payload, $checkout_id)
+    {
+        if ($payload === '') {
+            return [];
+        }
+        $decrypted = Crypto::decrypt($payload, 'adoology_checkout_' . $checkout_id);
+        $data = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
+
+        return is_array($data) ? $data : [];
+    }
+
+    /**
+     * Build trusted product data for every captured cart item.
+     *
+     * @param  array  $items  Stored cart items.
+     * @return array
+     */
+    private static function event_items($items)
+    {
+        $result = [];
+        foreach (self::sanitize_items($items) as $item) {
+            if ($item['product_id'] <= 0) {
+                continue;
+            }
+            $product_name = self::product_name($item['product_id'], $item['variation_id']);
+            if ($product_name !== '') {
+                $item['product_name'] = $product_name;
+            }
+            $result[] = $item;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Resolve a trusted WooCommerce product or variation name.
+     *
+     * @param  int  $product_id  Parent product ID.
+     * @param  int  $variation_id  Variation ID.
+     * @return string
+     */
+    private static function product_name($product_id, $variation_id)
+    {
+        $product = wc_get_product($variation_id ?: $product_id);
+        if (!$product) {
+            return '';
+        }
+        $name = sanitize_text_field((string) $product->get_name());
+
+        return function_exists('mb_substr') ? mb_substr($name, 0, 190) : substr($name, 0, 190);
     }
 
     /**
