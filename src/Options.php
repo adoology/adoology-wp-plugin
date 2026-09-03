@@ -65,7 +65,7 @@ class Options
             'adoology_product_auto_sync' => 'yes',
             'adoology_inventory_auto_sync' => 'yes',
             'adoology_channel_product_add_sync' => 'yes',
-            'adoology_tracking_enabled' => 'no',
+            'adoology_tracking_enabled' => 'yes',
             'adoology_incomplete_timeout_minutes' => 30,
             'adoology_incomplete_expire_days' => 7,
             'adoology_fraud_enabled' => 'yes',

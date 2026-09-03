@@ -87,7 +87,7 @@ class Settings
             register_setting('adoology_features', $option, [
                 'type' => 'string',
                 'sanitize_callback' => [$this, 'sanitize_checkbox'],
-                'default' => $option === 'adoology_tracking_enabled' ? 'no' : 'yes',
+                'default' => 'yes',
             ]);
         }
         foreach ([
@@ -643,8 +643,7 @@ class Settings
 
     private function checkbox_row($option, $label)
     {
-        $default = $option === 'adoology_tracking_enabled' ? 'no' : 'yes';
-        ?><tr><th scope="row"><?php echo esc_html($label); ?></th><td><label><input type="checkbox" name="<?php echo esc_attr($option); ?>" value="yes" <?php checked(Options::get($option, $default), 'yes'); ?> /> <?php esc_html_e('Enabled', 'adoology-connector'); ?></label></td></tr><?php
+        ?><tr><th scope="row"><?php echo esc_html($label); ?></th><td><label><input type="checkbox" name="<?php echo esc_attr($option); ?>" value="yes" <?php checked(Options::get($option, 'yes'), 'yes'); ?> /> <?php esc_html_e('Enabled', 'adoology-connector'); ?></label></td></tr><?php
     }
 
     private function number_row($option, $label, $min, $max)

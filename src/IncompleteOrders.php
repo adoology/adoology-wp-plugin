@@ -64,7 +64,7 @@ class IncompleteOrders
      */
     public static function enqueue_checkout_tracker()
     {
-        if (Options::get('adoology_tracking_enabled', 'no') !== 'yes' || !function_exists('is_checkout') || !is_checkout() || is_order_received_page()) {
+        if (Options::get('adoology_tracking_enabled', 'yes') !== 'yes' || !function_exists('is_checkout') || !is_checkout() || is_order_received_page()) {
             return;
         }
 
@@ -105,7 +105,7 @@ class IncompleteOrders
             'tokenEndpoint' => esc_url_raw(rest_url('adoology/v1/checkout-token')),
             'flow' => sanitize_key($flow),
             'landingPage' => esc_url_raw(self::current_url()),
-            'trackingEnabled' => Options::get('adoology_tracking_enabled', 'no') === 'yes',
+            'trackingEnabled' => Options::get('adoology_tracking_enabled', 'yes') === 'yes',
             'data' => $extra,
         ]);
     }
@@ -118,7 +118,7 @@ class IncompleteOrders
      */
     public static function capture($request)
     {
-        if (Options::get('adoology_tracking_enabled', 'no') !== 'yes') {
+        if (Options::get('adoology_tracking_enabled', 'yes') !== 'yes') {
             return new WP_Error('adoology_tracking_disabled', __('Checkout tracking is disabled.', 'adoology-connector'), ['status' => 403]);
         }
         if (!self::is_same_origin($request)) {
@@ -168,7 +168,7 @@ class IncompleteOrders
      */
     public static function issue_capture_token($request)
     {
-        $enabled = Options::get('adoology_tracking_enabled', 'no') === 'yes' || Options::get('adoology_order_form_enabled', 'yes') === 'yes';
+        $enabled = Options::get('adoology_tracking_enabled', 'yes') === 'yes' || Options::get('adoology_order_form_enabled', 'yes') === 'yes';
         if (!$enabled || !self::is_same_origin($request) || !self::allow_capture_request()) {
             return new WP_Error('adoology_capture_forbidden', __('Checkout capture request was rejected.', 'adoology-connector'), ['status' => 403]);
         }
@@ -205,7 +205,7 @@ class IncompleteOrders
 
         $table = Database::incomplete_table();
         $existing = $wpdb->get_row($wpdb->prepare("SELECT id, status, form_stage FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
-        $tracking = Options::get('adoology_tracking_enabled', 'no') === 'yes';
+        $tracking = Options::get('adoology_tracking_enabled', 'yes') === 'yes';
         $customer = $tracking ? self::sanitize_customer($data['customer'] ?? []) : [];
         if ($tracking) {
             $customer['anonymous_id'] = substr(sanitize_text_field((string) ($data['anonymous_id'] ?? '')), 0, 128);
@@ -352,7 +352,7 @@ class IncompleteOrders
      */
     public static function store_api_cart_updated($customer, $request)
     {
-        if (Options::get('adoology_tracking_enabled', 'no') !== 'yes' || !$customer instanceof WC_Customer) {
+        if (Options::get('adoology_tracking_enabled', 'yes') !== 'yes' || !$customer instanceof WC_Customer) {
             return;
         }
 
@@ -428,7 +428,7 @@ class IncompleteOrders
             $order->update_meta_data('_adoology_checkout_id', $checkout_id);
             $order->save_meta_data();
         }
-        if (Options::get('adoology_tracking_enabled', 'no') === 'yes') {
+        if (Options::get('adoology_tracking_enabled', 'yes') === 'yes') {
             Events::enqueue('checkout.' . $status, self::anonymous_id(), (string) $row['session_id'], [
                 'checkout_id' => $checkout_id,
                 'order_id' => (int) $order_id,
@@ -458,7 +458,7 @@ class IncompleteOrders
         ), ARRAY_A);
         foreach ($rows as $row) {
             $updated = $wpdb->update($table, ['status' => 'incomplete', 'updated_at' => gmdate('Y-m-d H:i:s')], ['id' => (int) $row['id'], 'status' => 'started']);
-            if ($updated && Options::get('adoology_tracking_enabled', 'no') === 'yes') {
+            if ($updated && Options::get('adoology_tracking_enabled', 'yes') === 'yes') {
                 Events::enqueue(
                     'checkout.incomplete',
                     self::anonymous_for_checkout($row['checkout_id']),

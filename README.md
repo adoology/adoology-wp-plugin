@@ -1,6 +1,6 @@
 # Adoology for WooCommerce
 
-Adoology for WooCommerce connects a WooCommerce store to an Adoology workspace for catalog, customer, order, and inventory synchronization. It also provides durable storefront event delivery, opt-in incomplete-order tracking, local fraud protection, and a cart-independent landing-page order form.
+Adoology for WooCommerce connects a WooCommerce store to an Adoology workspace for catalog, customer, order, and inventory synchronization. It also provides durable storefront event delivery, configurable incomplete-order tracking, local fraud protection, and a cart-independent landing-page order form.
 
 Current plugin version: `0.1.0`
 
@@ -230,7 +230,7 @@ Default values are installed when the plugin activates.
 | Setting | Option | Default | Admin range or behavior |
 | --- | --- | --- | --- |
 | API URL | `adoology_api_base_url` | `https://api.adoology.com` | Public HTTPS origin; no `/v1` suffix |
-| Incomplete-order tracking | `adoology_tracking_enabled` | Disabled | Enable only after privacy/consent review |
+| Incomplete-order tracking | `adoology_tracking_enabled` | Enabled | Disable if required by privacy or consent policy |
 | Mark incomplete after | `adoology_incomplete_timeout_minutes` | 30 minutes | 5 to 1,440 minutes |
 | Incomplete data expiry | `adoology_incomplete_expire_days` | 7 days | 1 to 90 days |
 | Fraud protection | `adoology_fraud_enabled` | Enabled | Covers classic, Store API, and order-form flows |
@@ -277,7 +277,7 @@ The backend queue worker must consume `channel-sync`; otherwise connections rema
 
 ## Incomplete-order tracking
 
-Incomplete-order tracking is disabled by default. When enabled, the plugin tracks classic checkout, WooCommerce Checkout Blocks, and the Adoology order form.
+Incomplete-order tracking is enabled by default. The plugin tracks classic checkout, WooCommerce Checkout Blocks, and the Adoology order form unless a merchant disables it in settings.
 
 ### Lifecycle
 
@@ -507,7 +507,7 @@ Tokens, secrets, signatures, API keys, bearer credentials, and Woo consumer cred
 
 ## Privacy and data retention
 
-Incomplete-order tracking is opt-in and disabled by default. Merchants are responsible for updating their privacy policy and obtaining consent required by their jurisdiction before enabling it.
+Incomplete-order tracking is enabled by default. Merchants are responsible for updating their privacy policy, obtaining consent required by their jurisdiction, or disabling tracking before accepting traffic.
 
 The plugin adds suggested text under WordPress's privacy-policy guide and registers:
 

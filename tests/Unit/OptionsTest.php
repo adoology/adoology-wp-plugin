@@ -67,7 +67,7 @@ class OptionsTest extends TestCase
         Options::install_defaults();
 
         $this->assertSame('https://api.adoology.com', $options['adoology_api_base_url']);
-        $this->assertSame('no', $options['adoology_tracking_enabled']);
+        $this->assertSame('yes', $options['adoology_tracking_enabled']);
         $this->assertSame(30, $options['adoology_incomplete_timeout_minutes']);
         $this->assertArrayNotHasKey('adoology_inbound_secret', $options);
     }
