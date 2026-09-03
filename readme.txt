@@ -1,9 +1,9 @@
 === Adoology for WooCommerce ===
 Contributors: adoology
 Tags: woocommerce, orders, ecommerce, fraud, automation
-Requires at least: 6.5
-Requires PHP: 8.0 
-Stable tag: 1.0.0
+Requires at least: 6.0
+Requires PHP: 7.4
+Stable tag: 0.1.0
 License: GPLv2 or later
 
 == Description ==

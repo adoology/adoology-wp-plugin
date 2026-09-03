@@ -1,0 +1,108 @@
+name: Release plugin
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          coverage: none
+          tools: composer
+
+      - name: Read release metadata
+        id: metadata
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "archive=adoology-connector-${version}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release version
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          php <<'PHP'
+          <?php
+          $releaseVersion = getenv('RELEASE_VERSION');
+          $source = file_get_contents('adoology-connector.php');
+          $readme = file_get_contents('readme.txt');
+
+          preg_match('/^\s*\*?\s*Version:\s*(\S+)\s*$/mi', $source, $header);
+          preg_match('/define\(\s*[\'\"]ADOOLOGY_VERSION[\'\"]\s*,\s*[\'\"]([^\'\"]+)[\'\"]\s*\)/', $source, $constant);
+          preg_match('/^Stable tag:\s*(\S+)\s*$/mi', $readme, $stableTag);
+
+          if (!preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/', $releaseVersion)) {
+              fwrite(STDERR, "Tag must use a semantic version, for example v0.1.0 or v0.2.0-alpha.1.\n");
+              exit(1);
+          }
+
+          if (($header[1] ?? null) !== $releaseVersion || ($constant[1] ?? null) !== $releaseVersion || ($stableTag[1] ?? null) !== $releaseVersion) {
+              fwrite(STDERR, "Tag, plugin header, ADOOLOGY_VERSION, and readme stable tag must match.\n");
+              exit(1);
+          }
+          PHP
+
+      - name: Install production dependencies
+        run: composer install --no-dev --prefer-dist --optimize-autoloader --classmap-authoritative --no-interaction --no-progress --no-scripts
+
+      - name: Build installable ZIP
+        env:
+          ARCHIVE_NAME: ${{ steps.metadata.outputs.archive }}
+        run: |
+          mkdir -p build/adoology-connector
+          cp adoology-connector.php uninstall.php readme.txt build/adoology-connector/
+          cp -R assets src vendor build/adoology-connector/
+          (cd build && zip -r -9 "../${ARCHIVE_NAME}" adoology-connector)
+
+      - name: Verify installable ZIP
+        env:
+          ARCHIVE_NAME: ${{ steps.metadata.outputs.archive }}
+        run: |
+          unzip -q "$ARCHIVE_NAME" -d verify
+          test -f verify/adoology-connector/adoology-connector.php
+          test -f verify/adoology-connector/vendor/autoload.php
+          test ! -e verify/adoology-connector/composer.json
+          test ! -e verify/adoology-connector/composer.lock
+          test ! -e verify/adoology-connector/tests
+          php -r "require 'verify/adoology-connector/vendor/autoload.php'; exit(class_exists('Adoology\\Plugin') ? 0 : 1);"
+
+      - name: Create release and upload ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_NAME: ${{ steps.metadata.outputs.archive }}
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ARCHIVE_NAME" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            release_flags=()
+            if [[ "$RELEASE_VERSION" == *-* ]]; then
+              release_flags+=(--prerelease)
+            fi
+
+            gh release create "$GITHUB_REF_NAME" "$ARCHIVE_NAME" \
+              --verify-tag \
+              --generate-notes \
+              --title "Adoology for WooCommerce ${RELEASE_VERSION}" \
+              --repo "$GITHUB_REPOSITORY" \
+              "${release_flags[@]}"
+          fi

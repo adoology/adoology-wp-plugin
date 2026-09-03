@@ -118,7 +118,7 @@ Plugin and backend releases that implement this contract must be deployed togeth
 
 ### WordPress admin
 
-1. Package this repository as `adoology-connector.zip` with `adoology-connector.php` at the archive's plugin root.
+1. Open the repository's GitHub release and download the attached `adoology-connector-VERSION.zip` file. Do not use GitHub's automatically generated **Source code** archives because they do not contain Composer dependencies.
 2. Open **Plugins > Add New Plugin > Upload Plugin**.
 3. Upload the archive and select **Install Now**.
 4. Activate **Adoology for WooCommerce**.
@@ -792,7 +792,7 @@ Unit tests cover crypto round-trips, option handling, log redaction, API URL/tok
 
 ### Release checklist
 
-1. Update plugin version in the header and `ADOOLOGY_VERSION` together.
+1. Update plugin version in the header, `ADOOLOGY_VERSION`, `readme.txt` stable tag, and README current version together.
 2. Verify backend callback and connection contracts remain compatible.
 3. Run all PHP and JavaScript syntax checks.
 4. Test activation, connection, Woo authorization, initial sync, event delivery, order form, disconnect, deactivation, and uninstall.
@@ -800,4 +800,6 @@ Unit tests cover crypto round-trips, option handling, log redaction, API URL/tok
 6. Test with HPOS enabled.
 7. Test mobile and desktop order-form layouts.
 8. Review privacy-policy language and default consent behavior.
-9. Package only runtime files; exclude `.git` and local tooling.
+9. Commit and push the release changes, then create and push the matching version tag, for example `git tag v0.1.0 && git push origin v0.1.0`.
+10. Confirm the **Release plugin** GitHub Actions workflow succeeds and attaches `adoology-connector-VERSION.zip` to the release.
+11. Download and install the attached ZIP in a clean WordPress site. The workflow includes optimized production Composer autoload files under `vendor/` while excluding `composer.json`, `composer.lock`, tests, and local tooling.
