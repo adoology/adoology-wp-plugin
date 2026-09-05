@@ -49,14 +49,23 @@ jobs:
           preg_match('/define\(\s*[\'\"]ADOOLOGY_VERSION[\'\"]\s*,\s*[\'\"]([^\'\"]+)[\'\"]\s*\)/', $source, $constant);
           preg_match('/^Stable tag:\s*(\S+)\s*$/mi', $readme, $stableTag);
 
-          if (!preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/', $releaseVersion)) {
-              fwrite(STDERR, "Tag must use a semantic version, for example v0.1.0 or v0.2.0-alpha.1.\n");
+          $fail = static function ($message) {
+              file_put_contents('php://stderr', $message . "\n");
               exit(1);
+          };
+
+          if (!preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/', $releaseVersion)) {
+              $fail('Tag must use a semantic version, for example v0.1.0 or v0.2.0-alpha.1.');
           }
 
           if (($header[1] ?? null) !== $releaseVersion || ($constant[1] ?? null) !== $releaseVersion || ($stableTag[1] ?? null) !== $releaseVersion) {
-              fwrite(STDERR, "Tag, plugin header, ADOOLOGY_VERSION, and readme stable tag must match.\n");
-              exit(1);
+              $fail(sprintf(
+                  'Version mismatch: tag=%s, plugin header=%s, ADOOLOGY_VERSION=%s, stable tag=%s.',
+                  $releaseVersion,
+                  $header[1] ?? 'missing',
+                  $constant[1] ?? 'missing',
+                  $stableTag[1] ?? 'missing'
+              ));
           }
           PHP
 

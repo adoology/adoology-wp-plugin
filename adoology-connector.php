@@ -6,7 +6,7 @@ use Adoology\Plugin;
  * Plugin Name: Adoology for WooCommerce
  * Plugin URI: https://adoology.com
  * Description: Connect WooCommerce to Adoology for catalog, customer, order, and inventory synchronization.
- * Version: 0.1.0
+ * Version: 0.1.2
  * Author: Adoology
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('ADOOLOGY_VERSION')) {
-    define('ADOOLOGY_VERSION', '0.1.0');
+    define('ADOOLOGY_VERSION', '0.1.2');
 }
 
 define('ADOOLOGY_PLUGIN_FILE', __FILE__);
