@@ -141,7 +141,6 @@ class ApiClient
             return new WP_Error('adoology_invalid_idempotency_key', __('Invalid idempotency key.', 'adoology-connector'));
         }
 
-        $plugin_version = defined('ADOOLOGY_VERSION') ? ADOOLOGY_VERSION : 'unknown';
         $headers = [
             'Authorization' => 'Bearer ' . $token,
             'Accept' => 'application/json',
@@ -167,7 +166,7 @@ class ApiClient
                 'redirection' => 0,
                 'reject_unsafe_urls' => true,
                 'httpversion' => '1.1',
-                'user-agent' => 'Adoology-Connector/' . $plugin_version . '; ' . home_url('/'),
+                'user-agent' => 'Adoology-Connector/' . (defined('ADOOLOGY_VERSION') ? ADOOLOGY_VERSION : 'unknown') . '; ' . home_url('/'),
                 'headers' => $headers,
                 'body' => $encoded_body,
             ]);
