@@ -108,7 +108,15 @@ class Connection
         $local_connection_id = self::connection_id();
         $local_secret = $local_connection_id !== '' ? Crypto::get_secret('adoology_webhook_secret') : '';
         if ($local_connection_id !== '' && !is_wp_error($local_secret) && preg_match('/^[a-f0-9]{64}$/Di', $local_secret)) {
-            return self::refresh_status();
+            $refreshed = self::refresh_status();
+            if (is_wp_error($refreshed)) {
+                return $refreshed;
+            }
+
+            $connection_state = Options::get('adoology_connection_state', []);
+            if (!is_array($connection_state) || ($connection_state['status'] ?? '') !== 'connecting') {
+                return true;
+            }
         }
 
         $idempotency = Options::get('adoology_create_idempotency_key', []);
