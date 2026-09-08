@@ -89,6 +89,7 @@ final class Plugin
             Events::PROCESS_HOOK,
             Events::CLEANUP_HOOK,
             IncompleteOrders::LIFECYCLE_HOOK,
+            IncompleteOrders::COMPLETION_HOOK,
         ];
         foreach (array_merge($hooks, self::LEGACY_HOOKS) as $hook) {
             Scheduler::unschedule_hook($hook);

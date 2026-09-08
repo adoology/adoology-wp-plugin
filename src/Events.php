@@ -6,6 +6,8 @@
 
 namespace Adoology;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use Exception;
 use WP_Error;
 
@@ -65,7 +67,7 @@ class Events
             'properties' => self::sanitize_value($properties, 0),
             'context' => self::sanitize_value($context, 0),
             'source' => 'api',
-            'occurred_at' => gmdate('c'),
+            'occurred_at' => (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d\TH:i:s.u\Z'),
         ];
         $json = wp_json_encode($event);
         if (!is_string($json) || strlen($json) > 65535) {

@@ -73,7 +73,7 @@ function adoology_uninstall_site()
         }
     }
 
-    foreach (['adoology_connection_health_check', 'adoology_webhook_retry', 'adoology_process_events', 'adoology_cleanup_events', 'adoology_incomplete_order_lifecycle'] as $hook) {
+    foreach (['adoology_connection_health_check', 'adoology_webhook_retry', 'adoology_process_events', 'adoology_cleanup_events', 'adoology_incomplete_order_lifecycle', 'adoology_complete_checkout'] as $hook) {
         if (class_exists(Scheduler::class)) {
             Scheduler::unschedule_hook($hook);
         } else {

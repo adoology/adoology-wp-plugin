@@ -6,8 +6,11 @@
 
 namespace Adoology\Tests\Unit;
 
+use Adoology\Crypto;
 use Adoology\Events;
 use Adoology\Tests\TestCase;
+use DateTimeImmutable;
+use DateTimeZone;
 use ReflectionMethod;
 
 use function Brain\Monkey\Functions\when;
@@ -17,6 +20,50 @@ use function Brain\Monkey\Functions\when;
  */
 class EventsTest extends TestCase
 {
+    /**
+     * @covers ::enqueue
+     */
+    public function test_enqueue_preserves_utc_microseconds()
+    {
+        global $wpdb;
+
+        when('get_option')->justReturn('');
+        when('wp_salt')->justReturn('test-auth-secret');
+        when('get_current_blog_id')->justReturn(1);
+        when('wp_next_scheduled')->justReturn(time() + 1);
+        $previous_wpdb = $wpdb;
+        $wpdb = new class
+        {
+            public $prefix = 'wp_';
+
+            public $row = [];
+
+            public function insert($table, $row, $formats)
+            {
+                $this->row = $row;
+
+                return 1;
+            }
+        };
+
+        try {
+            $before = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            $id = Events::enqueue('checkout.updated', 'anonymous', 'session');
+            $after = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            $this->assertIsString($id);
+            $json = Crypto::decrypt($wpdb->row['payload'], 'adoology_event_' . $id);
+            $this->assertIsString($json);
+            $event = json_decode($json, true);
+
+            $this->assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/', $event['occurred_at']);
+            $occurred_at = new DateTimeImmutable($event['occurred_at']);
+            $this->assertGreaterThanOrEqual($before, $occurred_at);
+            $this->assertLessThanOrEqual($after, $occurred_at);
+        } finally {
+            $wpdb = $previous_wpdb;
+        }
+    }
+
     /**
      * @covers ::ulid
      */

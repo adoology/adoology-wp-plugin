@@ -193,6 +193,15 @@ class OrderForm
             'capture_signature' => wp_unslash($_POST['_adoology_capture_signature'] ?? ''),
         ], $product_id);
 
+        $accepted_order_id = IncompleteOrders::accepted_order_id($checkout_id);
+        if ($accepted_order_id) {
+            $existing_order = wc_get_order($accepted_order_id);
+            if ($existing_order) {
+                wp_safe_redirect($existing_order->needs_payment() ? $existing_order->get_checkout_payment_url() : $existing_order->get_checkout_order_received_url());
+                exit;
+            }
+        }
+
         $risk = Fraud::enabled() ? Fraud::evaluate([
             'phone' => $phone,
             'email' => $email,
@@ -296,9 +305,6 @@ class OrderForm
             } else {
                 $redirect = $order->get_checkout_payment_url();
             }
-            IncompleteOrders::mark_complete($checkout_id, $order->get_id(), $order);
-            wp_safe_redirect($redirect);
-            exit;
         } catch (Throwable $throwable) {
             if ($order instanceof WC_Order && !$order->is_paid()) {
                 $order->delete(true);
@@ -306,7 +312,12 @@ class OrderForm
             IncompleteOrders::release_submission($checkout_id);
             Logger::log('error', 'Landing-page order creation failed.', ['error' => $throwable->getMessage()]);
             self::fail(__('Could not create the order. Please review your details and try again.', 'adoology-connector'), $referer);
+
+            return;
         }
+        IncompleteOrders::mark_complete($checkout_id, $order->get_id(), $order);
+        wp_safe_redirect($redirect);
+        exit;
     }
 
     private static function variation_field($product)

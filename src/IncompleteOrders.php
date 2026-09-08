@@ -6,6 +6,7 @@
 
 namespace Adoology;
 
+use Throwable;
 use WC_Customer;
 use WC_Order;
 use WP_Error;
@@ -37,6 +38,8 @@ class IncompleteOrders
 
     const COOKIE_CHECKOUT = 'adoology_checkout_id';
 
+    const COMPLETION_HOOK = 'adoology_complete_checkout';
+
     /**
      * Register tracking and conversion hooks.
      */
@@ -48,6 +51,10 @@ class IncompleteOrders
         add_action('woocommerce_store_api_cart_update_customer_from_request', [self::class, 'store_api_cart_updated'], 20, 2);
         add_action('woocommerce_store_api_checkout_update_order_from_request', [self::class, 'store_api_capture_identity'], 20, 2);
         add_action('woocommerce_store_api_checkout_order_processed', [self::class, 'store_api_checkout_completed'], 30, 1);
+        add_filter('woocommerce_payment_successful_result', [self::class, 'payment_successful'], PHP_INT_MAX, 2);
+        add_filter('woocommerce_checkout_no_payment_needed_redirect', [self::class, 'no_payment_needed'], PHP_INT_MAX, 2);
+        add_filter('rest_request_after_callbacks', [self::class, 'store_api_checkout_response'], PHP_INT_MAX, 3);
+        add_action(self::COMPLETION_HOOK, [self::class, 'mark_complete'], 10, 4);
         add_action(self::LIFECYCLE_HOOK, [self::class, 'advance_lifecycle'], 10, 2);
         add_filter('wp_privacy_personal_data_exporters', [self::class, 'register_exporter']);
         add_filter('wp_privacy_personal_data_erasers', [self::class, 'register_eraser']);
@@ -111,6 +118,7 @@ class IncompleteOrders
             'flow' => $flow,
             'product_id' => $flow === 'order_form' ? max(0, (int) ($extra['items'][0]['product_id'] ?? 0)) : 0,
             'instance' => wp_generate_uuid4(),
+            'issued_at' => microtime(true),
             'landing_page' => esc_url_raw(self::current_url()),
             'expires' => time() + 12 * HOUR_IN_SECONDS,
         ];
@@ -134,6 +142,7 @@ class IncompleteOrders
         wp_localize_script('adoology-checkout-tracker', 'adoologyCheckout', [
             'endpoint' => esc_url_raw(rest_url('adoology/v1/checkout')),
             'tokenEndpoint' => esc_url_raw(rest_url('adoology/v1/checkout-token')),
+            'restNonce' => wp_create_nonce('wp_rest'),
             'flow' => $flow,
             'landingPage' => $context['landing_page'],
             'trackingEnabled' => Options::get('adoology_tracking_enabled', 'no') === 'yes',
@@ -196,12 +205,16 @@ class IncompleteOrders
             'landing_page' => $context['landing_page'],
             'form_stage' => $params['form_stage'] ?? 'started',
             'items' => $trusted['items'],
+            'capture_instance' => $context['instance'] ?? '',
+            'capture_sequence' => max(0, (int) ($params['capture_sequence'] ?? 0)),
+            'capture_generation' => (float) ($context['issued_at'] ?? 0),
+            'billing_contact' => ($params['billing_contact'] ?? false) === true,
         ]);
         if (is_wp_error($result)) {
             return $result;
         }
 
-        return new WP_REST_Response(['stored' => true], 202);
+        return new WP_REST_Response(['stored' => $result === true], 202);
     }
 
     /**
@@ -222,9 +235,14 @@ class IncompleteOrders
         if (!$enabled || !is_array($context) || !self::is_same_origin($request) || !self::allow_capture_request('token:' . self::client_ip())) {
             return new WP_Error('adoology_capture_forbidden', __('Checkout capture request was rejected.', 'adoology-connector'), ['status' => 403]);
         }
-        $anonymous_id = wp_generate_uuid4();
-        $checkout_id = wp_generate_uuid4();
-        $session_id = wp_generate_uuid4();
+        $identity = $context['flow'] === 'checkout' ? self::identity(true) : [
+            'anonymous_id' => wp_generate_uuid4(),
+            'checkout_id' => wp_generate_uuid4(),
+            'session_id' => wp_generate_uuid4(),
+        ];
+        $anonymous_id = $identity['anonymous_id'];
+        $checkout_id = $identity['checkout_id'];
+        $session_id = $identity['session_id'];
         $expires = time() + 2 * HOUR_IN_SECONDS;
         $response = new WP_REST_Response([
             'anonymous_id' => $anonymous_id,
@@ -333,9 +351,27 @@ class IncompleteOrders
      *
      * @param  string  $checkout_id  Checkout UUID.
      * @param  array  $data  Snapshot data.
-     * @return true|WP_Error
+     * @return bool|WP_Error
      */
     public static function store_snapshot($checkout_id, $data)
+    {
+        return self::with_checkout_lock($checkout_id, function () use ($checkout_id, $data) {
+            global $wpdb;
+
+            $wpdb->query('START TRANSACTION');
+            try {
+                $result = self::store_snapshot_locked($checkout_id, $data);
+                $wpdb->query(is_wp_error($result) ? 'ROLLBACK' : 'COMMIT');
+
+                return $result;
+            } catch (Throwable $error) {
+                $wpdb->query('ROLLBACK');
+                throw $error;
+            }
+        });
+    }
+
+    private static function store_snapshot_locked($checkout_id, $data)
     {
         global $wpdb;
 
@@ -344,12 +380,47 @@ class IncompleteOrders
         }
 
         $table = Database::incomplete_table();
-        $existing = $wpdb->get_row($wpdb->prepare("SELECT id, status, form_stage, customer_data FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
+        if (self::accepted_order_id($checkout_id)) {
+            return false;
+        }
+        $existing = $wpdb->get_row($wpdb->prepare("SELECT id, status, form_stage, customer_data, product_id, variation_id, quantity, value_minor, currency, flow FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
+        if ($existing && in_array($existing['status'], ['converted', 'recovered', 'expired'], true)) {
+            return false;
+        }
         $tracking = Options::get('adoology_tracking_enabled', 'no') === 'yes';
-        $customer = $tracking ? self::sanitize_customer($data['customer'] ?? []) : [];
+        $previous = $existing ? self::customer_payload((string) $existing['customer_data'], $checkout_id) : [];
+        $instance = (string) ($data['capture_instance'] ?? '');
+        $sequence = (int) ($data['capture_sequence'] ?? 0);
+        $generation = isset($data['capture_generation']) ? (float) $data['capture_generation'] : null;
+        if ($generation !== null && $generation < ($previous['_capture_generation'] ?? 0)) {
+            return false;
+        }
+        if ($sequence > 0 && self::is_uuid($instance) && $sequence <= ($previous['_capture_sequences'][$instance] ?? 0)) {
+            return false;
+        }
+        $customer = $tracking ? array_replace($previous, self::sanitize_customer($data['customer'] ?? [])) : [];
+        if (!$existing && $tracking && (empty($customer['name']) || empty($customer['phone']))) {
+            return false;
+        }
+        if (!$tracking && ($data['flow'] ?? '') !== 'order_form') {
+            return false;
+        }
+        if (!$existing && ($data['flow'] ?? 'checkout') === 'checkout' && empty($data['items'])) {
+            return false;
+        }
         if ($tracking) {
             $customer['anonymous_id'] = substr(sanitize_text_field((string) ($data['anonymous_id'] ?? '')), 0, 128);
             $customer['items'] = self::sanitize_items($data['items'] ?? []);
+            $customer['_billing_contact'] = !empty($previous['_billing_contact']) || !empty($data['billing_contact']);
+            if ($generation !== null && $generation > ($previous['_capture_generation'] ?? 0)) {
+                $customer['_capture_sequences'] = [];
+            }
+            if ($generation !== null) {
+                $customer['_capture_generation'] = $generation;
+            }
+            if ($sequence > 0 && self::is_uuid($instance)) {
+                $customer['_capture_sequences'][$instance] = $sequence;
+            }
         }
         $json = $tracking ? wp_json_encode($customer) : '';
         $encrypted = $json && $customer ? Crypto::encrypt($json, 'adoology_checkout_' . $checkout_id) : '';
@@ -384,22 +455,28 @@ class IncompleteOrders
         }
 
         if ($existing) {
-            if (in_array($existing['status'], ['converted', 'recovered', 'expired'], true)) {
-                return true;
-            }
             $stages = ['started' => 1, 'details' => 2, 'leaving' => 3, 'submitted' => 4, 'completed' => 5];
             if (($stages[$existing['form_stage']] ?? 0) > ($stages[$row['form_stage']] ?? 0)) {
                 $row['form_stage'] = $existing['form_stage'];
             }
-            $wpdb->update($table, $row, ['id' => (int) $existing['id']]);
-            if ($tracking && $existing['status'] === 'incomplete' && self::customer_changed((string) $existing['customer_data'], $checkout_id, $customer)) {
-                Events::enqueue(
+            if ($wpdb->update($table, $row, ['id' => (int) $existing['id']]) === false) {
+                return new WP_Error('adoology_checkout_store_failed', __('Could not store incomplete checkout.', 'adoology-connector'));
+            }
+            $changed = self::public_customer($previous) !== self::public_customer($customer) || ($previous['items'] ?? []) !== ($customer['items'] ?? []);
+            foreach (['form_stage', 'product_id', 'variation_id', 'quantity', 'value_minor', 'currency', 'flow'] as $field) {
+                $changed = $changed || (string) $existing[$field] !== (string) $row[$field];
+            }
+            if ($tracking && $changed) {
+                $event = Events::enqueue(
                     'checkout.updated',
                     (string) ($data['anonymous_id'] ?? self::anonymous_id()),
                     $row['session_id'],
                     self::incomplete_event_properties(['checkout_id' => $checkout_id] + $row),
                     self::request_context()
                 );
+                if (is_wp_error($event)) {
+                    return $event;
+                }
             }
 
             return true;
@@ -410,35 +487,21 @@ class IncompleteOrders
         $row['created_at'] = $now;
         $inserted = $wpdb->insert($table, $row);
         if (!$inserted) {
-            $race = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$table} WHERE checkout_id = %s", $checkout_id));
-            if ($race) {
-                unset($row['checkout_id'], $row['status'], $row['created_at']);
-                $wpdb->update($table, $row, ['id' => (int) $race]);
-
-                return true;
-            }
-
             return new WP_Error('adoology_checkout_store_failed', __('Could not store incomplete checkout.', 'adoology-connector'));
         }
 
         if ($tracking) {
-            Events::enqueue('checkout.started', (string) ($data['anonymous_id'] ?? self::anonymous_id()), $row['session_id'], [
-                'checkout_id' => $checkout_id,
-                'flow' => $row['flow'],
-                'product_id' => $row['product_id'],
-                'quantity' => $row['quantity'],
-                'value_minor' => $row['value_minor'],
-                'currency' => $row['currency'],
-                'form_stage' => $row['form_stage'],
-                'landing_page' => $row['landing_page'],
-            ], self::request_context());
+            $event = Events::enqueue('checkout.started', (string) ($data['anonymous_id'] ?? self::anonymous_id()), $row['session_id'], self::incomplete_event_properties($row), self::request_context());
+            if (is_wp_error($event)) {
+                return $event;
+            }
         }
 
         return true;
     }
 
     /**
-     * Mark classic checkout conversion.
+     * Bind classic checkout identity before payment is attempted.
      *
      * @param  int  $order_id  Order ID.
      * @param  array  $posted  Posted data.
@@ -446,21 +509,63 @@ class IncompleteOrders
      */
     public static function checkout_completed($order_id, $posted, $order)
     {
-        $checkout_id = isset($posted['_adoology_checkout_id']) ? sanitize_text_field($posted['_adoology_checkout_id']) : self::checkout_id();
-        self::mark_complete($checkout_id, $order_id, $order);
+        if ($order instanceof WC_Order) {
+            $order->update_meta_data('_adoology_checkout_id', self::identity()['checkout_id']);
+            $order->save_meta_data();
+        }
     }
 
     /**
-     * Mark Store API checkout conversion.
+     * Persist Store API identity before payment is attempted.
      *
      * @param  WC_Order  $order  Order.
      */
     public static function store_api_checkout_completed($order)
     {
         if ($order instanceof WC_Order) {
-            $checkout_id = (string) $order->get_meta('_adoology_checkout_id', true);
-            self::mark_complete($checkout_id ?: self::checkout_id(), $order->get_id(), $order);
+            if (!self::is_uuid((string) $order->get_meta('_adoology_checkout_id', true))) {
+                $order->update_meta_data('_adoology_checkout_id', self::identity()['checkout_id']);
+            }
+            $order->save_meta_data();
         }
+    }
+
+    public static function payment_successful($result, $order_id)
+    {
+        if (is_array($result) && ($result['result'] ?? '') === 'success') {
+            $order = wc_get_order($order_id);
+            if ($order instanceof WC_Order) {
+                self::mark_complete((string) $order->get_meta('_adoology_checkout_id', true), $order_id, $order);
+            }
+        }
+
+        return $result;
+    }
+
+    public static function no_payment_needed($redirect, $order)
+    {
+        if ($order instanceof WC_Order) {
+            self::mark_complete((string) $order->get_meta('_adoology_checkout_id', true), $order->get_id(), $order);
+        }
+
+        return $redirect;
+    }
+
+    public static function store_api_checkout_response($response, $handler, $request)
+    {
+        if ($request->get_method() !== 'POST' || !preg_match('#^/wc/store(?:/v1)?/checkout(?:/([0-9]+))?/?$#D', $request->get_route(), $route) || is_wp_error($response)) {
+            return $response;
+        }
+        $rest_response = rest_ensure_response($response);
+        $data = $rest_response->get_data();
+        if ($rest_response->get_status() >= 200 && $rest_response->get_status() < 300 && is_array($data) && ($data['payment_result']['payment_status'] ?? '') === 'success' && !empty($data['order_id']) && (empty($route[1]) || (int) $route[1] === (int) $data['order_id'])) {
+            $order = wc_get_order((int) $data['order_id']);
+            if ($order instanceof WC_Order) {
+                self::mark_complete((string) $order->get_meta('_adoology_checkout_id', true), $order->get_id(), $order);
+            }
+        }
+
+        return $response;
     }
 
     /**
@@ -474,12 +579,10 @@ class IncompleteOrders
         if (!$order instanceof WC_Order || !is_object($request)) {
             return;
         }
-        $extensions = $request->get_param('extensions');
-        $extension = is_array($extensions) && isset($extensions['adoology']) && is_array($extensions['adoology']) ? $extensions['adoology'] : [];
-        $checkout_id = sanitize_text_field((string) ($extension['checkout_id'] ?? ''));
-        if (self::is_uuid($checkout_id)) {
-            $order->update_meta_data('_adoology_checkout_id', $checkout_id);
+        if (preg_match('#/checkout/[0-9]+/?$#D', $request->get_route()) && self::is_uuid((string) $order->get_meta('_adoology_checkout_id', true))) {
+            return;
         }
+        $order->update_meta_data('_adoology_checkout_id', self::identity()['checkout_id']);
     }
 
     /**
@@ -490,11 +593,20 @@ class IncompleteOrders
      */
     public static function store_api_cart_updated($customer, $request)
     {
+        global $wpdb;
+
         if (Options::get('adoology_tracking_enabled', 'no') !== 'yes' || !$customer instanceof WC_Customer) {
             return;
         }
 
+        $cookie_checkout = isset($_COOKIE[self::COOKIE_CHECKOUT]) ? sanitize_text_field(wp_unslash($_COOKIE[self::COOKIE_CHECKOUT])) : '';
+        if (self::accepted_order_id($cookie_checkout)) {
+            return;
+        }
         $identity = self::identity();
+        if (self::accepted_order_id($identity['checkout_id'])) {
+            return;
+        }
         $cart = function_exists('WC') ? WC()->cart : null;
         $items = [];
         if ($cart) {
@@ -508,6 +620,28 @@ class IncompleteOrders
         }
         $primary_item = $items[0] ?? [];
 
+        $billing_name = trim($customer->get_billing_first_name() . ' ' . $customer->get_billing_last_name());
+        $shipping_name = trim($customer->get_shipping_first_name() . ' ' . $customer->get_shipping_last_name());
+        $billing_address = trim($customer->get_billing_address_1() . ' ' . $customer->get_billing_address_2());
+        $shipping_address = trim($customer->get_shipping_address_1() . ' ' . $customer->get_shipping_address_2());
+        $billing = (array) $request->get_param('billing_address');
+        $shipping = (array) $request->get_param('shipping_address');
+        $contact = [];
+        $fields = ['name' => ['first_name', 'last_name'], 'phone' => ['phone'], 'email' => ['email'], 'address' => ['address_1', 'address_2'], 'city' => ['city'], 'postcode' => ['postcode'], 'country' => ['country']];
+        $stored = $wpdb->get_var($wpdb->prepare('SELECT customer_data FROM ' . Database::incomplete_table() . ' WHERE checkout_id = %s', $identity['checkout_id']));
+        $previous = self::customer_payload((string) $stored, $identity['checkout_id']);
+        $billing_contact = !empty($previous['_billing_contact']) || $billing_name !== '' || $customer->get_billing_phone() !== '' || $billing_address !== '';
+        $default_billing = !$billing_contact;
+        foreach ($fields as $field => $parts) {
+            $has_billing = (bool) array_intersect($parts, array_keys($billing));
+            $has_shipping = (bool) array_intersect($parts, array_keys($shipping));
+            if (!$has_billing && !$has_shipping) {
+                continue;
+            }
+            $billing_value = $field === 'name' ? $billing_name : ($field === 'address' ? $billing_address : $customer->{'get_billing_' . $field}());
+            $shipping_value = $field === 'name' ? $shipping_name : ($field === 'address' ? $shipping_address : ($field === 'email' ? '' : $customer->{'get_shipping_' . $field}()));
+            $contact[$field] = $has_billing && (!$default_billing || $billing_value !== '' || !$has_shipping) ? $billing_value : $shipping_value;
+        }
         self::store_snapshot($identity['checkout_id'], [
             'anonymous_id' => $identity['anonymous_id'],
             'session_id' => $identity['session_id'],
@@ -517,15 +651,8 @@ class IncompleteOrders
             'quantity' => $primary_item['quantity'] ?? 1,
             'value_minor' => $cart ? self::to_minor($cart->get_total('edit')) : 0,
             'currency' => get_woocommerce_currency(),
-            'customer' => [
-                'name' => trim($customer->get_billing_first_name() . ' ' . $customer->get_billing_last_name()),
-                'phone' => $customer->get_billing_phone(),
-                'email' => $customer->get_billing_email(),
-                'address' => trim($customer->get_billing_address_1() . ' ' . $customer->get_billing_address_2()),
-                'city' => $customer->get_billing_city(),
-                'postcode' => $customer->get_billing_postcode(),
-                'country' => $customer->get_billing_country(),
-            ],
+            'customer' => $contact,
+            'billing_contact' => $billing_contact,
             'landing_page' => wp_get_referer() ?: wc_get_checkout_url(),
             'form_stage' => 'details',
             'items' => $items,
@@ -539,42 +666,111 @@ class IncompleteOrders
      * @param  int  $order_id  Order ID.
      * @param  WC_Order|null  $order  Order.
      */
-    public static function mark_complete($checkout_id, $order_id, $order = null)
+    public static function mark_complete($checkout_id, $order_id, $order = null, $attempt = 0)
+    {
+        if (!self::is_uuid($checkout_id)) {
+            return;
+        }
+        try {
+            $result = self::with_checkout_lock($checkout_id, function () use ($checkout_id, $order_id) {
+                global $wpdb;
+
+                $order = wc_get_order($order_id);
+                if (!$order instanceof WC_Order) {
+                    return true;
+                }
+                $table = Database::incomplete_table();
+                $row = $wpdb->get_row($wpdb->prepare("SELECT id, status, session_id, customer_data FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
+                $accepted_key = '_adoology_checkout_accepted_' . $checkout_id;
+                $event_key = '_adoology_checkout_completion_' . $checkout_id;
+                $order->update_meta_data('_adoology_checkout_id', $checkout_id);
+                $order->update_meta_data($accepted_key, $checkout_id);
+                $order->save_meta_data();
+                $order->read_meta_data(true);
+                if ($order->get_meta($accepted_key, true) !== $checkout_id) {
+                    return new WP_Error('adoology_checkout_marker_failed', 'Could not persist checkout acceptance.');
+                }
+
+                if (!$order->get_meta($event_key, true)) {
+                    $wpdb->query('START TRANSACTION');
+                    try {
+                        $event = 'untracked';
+                        if (Options::get('adoology_tracking_enabled', 'no') === 'yes' || !empty($row['customer_data'])) {
+                            $status = $row && in_array($row['status'], ['incomplete', 'submitting_recovery', 'recovered'], true) ? 'recovered' : 'converted';
+                            $identity = self::identity_for_checkout($checkout_id);
+                            $event = Events::enqueue('checkout.' . $status, $identity['anonymous_id'], $identity['session_id'], [
+                                'checkout_id' => $checkout_id,
+                                'order_id' => (int) $order_id,
+                                'status' => $status,
+                            ]);
+                            if (is_wp_error($event)) {
+                                $wpdb->query('ROLLBACK');
+
+                                return $event;
+                            }
+                        }
+                        $order->update_meta_data($event_key, $event);
+                        $order->save_meta_data();
+                        $order->read_meta_data(true);
+                        if ($order->get_meta($event_key, true) !== $event) {
+                            $wpdb->query('ROLLBACK');
+
+                            return new WP_Error('adoology_checkout_marker_failed', 'Could not persist checkout completion.');
+                        }
+                        $wpdb->query('COMMIT');
+                    } catch (Throwable $error) {
+                        $wpdb->query('ROLLBACK');
+                        throw $error;
+                    }
+                }
+                if ($wpdb->delete($table, ['checkout_id' => $checkout_id]) === false) {
+                    return new WP_Error('adoology_checkout_delete_failed', 'Could not remove completed checkout.');
+                }
+
+                return true;
+            });
+        } catch (Throwable $error) {
+            $result = new WP_Error('adoology_checkout_cleanup_failed', $error->getMessage());
+        }
+        if (is_wp_error($result)) {
+            // Cleanup must not turn an accepted payment into a failed checkout.
+            Logger::log('error', 'Checkout cleanup will be retried.', ['order_id' => (int) $order_id]);
+            Scheduler::schedule_single(time() + MINUTE_IN_SECONDS, self::COMPLETION_HOOK, [$checkout_id, (int) $order_id, null, (int) $attempt + 1]);
+        }
+    }
+
+    public static function accepted_order_id($checkout_id)
+    {
+        if (!self::is_uuid($checkout_id)) {
+            return 0;
+        }
+        $orders = wc_get_orders([
+            'limit' => 1,
+            'return' => 'ids',
+            'meta_key' => '_adoology_checkout_accepted_' . $checkout_id,
+            'meta_value' => $checkout_id,
+        ]);
+
+        return (int) ($orders[0] ?? 0);
+    }
+
+    private static function with_checkout_lock($checkout_id, $callback)
     {
         global $wpdb;
 
         if (!self::is_uuid($checkout_id)) {
-            return;
+            return new WP_Error('adoology_checkout_invalid', __('Invalid checkout identifier.', 'adoology-connector'));
         }
-        $table = Database::incomplete_table();
-        $row = $wpdb->get_row($wpdb->prepare("SELECT id, status, session_id FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
-        if (!$row || in_array($row['status'], ['converted', 'recovered'], true)) {
-            return;
+        // Serialize captures and completion even after the snapshot row is deleted.
+        $lock = 'ado_checkout_' . substr(hash('sha256', $wpdb->prefix . $checkout_id), 0, 48);
+        if ((int) $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, 5)', $lock)) !== 1) {
+            return new WP_Error('adoology_checkout_busy', __('Checkout is being updated. Please try again.', 'adoology-connector'), ['status' => 409]);
         }
-        $status = in_array($row['status'], ['incomplete', 'submitting_recovery'], true) ? 'recovered' : 'converted';
-        $updated = $wpdb->update($table, [
-            'status' => $status,
-            'order_id' => (int) $order_id,
-            'form_stage' => 'completed',
-            'updated_at' => gmdate('Y-m-d H:i:s'),
-        ], ['id' => (int) $row['id'], 'status' => $row['status']]);
-        if (!$updated) {
-            return;
+        try {
+            return $callback();
+        } finally {
+            $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $lock));
         }
-
-        if ($order instanceof WC_Order) {
-            $order->update_meta_data('_adoology_checkout_id', $checkout_id);
-            $order->save_meta_data();
-        }
-        if (Options::get('adoology_tracking_enabled', 'no') === 'yes') {
-            $identity = self::identity_for_checkout($checkout_id);
-            Events::enqueue('checkout.' . $status, $identity['anonymous_id'], $identity['session_id'], [
-                'checkout_id' => $checkout_id,
-                'order_id' => (int) $order_id,
-                'status' => $status,
-            ], self::request_context());
-        }
-        self::rotate_checkout_id();
     }
 
     /**
@@ -692,8 +888,17 @@ class IncompleteOrders
      */
     public static function claim_submission($checkout_id)
     {
+        return self::with_checkout_lock($checkout_id, fn () => self::claim_submission_locked($checkout_id));
+    }
+
+    private static function claim_submission_locked($checkout_id)
+    {
         global $wpdb;
 
+        $order_id = self::accepted_order_id($checkout_id);
+        if ($order_id) {
+            return ['claimed' => false, 'order_id' => $order_id];
+        }
         $table = Database::incomplete_table();
         $row = $wpdb->get_row($wpdb->prepare("SELECT id, status, order_id FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
         if (!$row) {
@@ -733,13 +938,45 @@ class IncompleteOrders
      *
      * @return array
      */
-    public static function identity()
+    public static function identity($renew = false)
     {
-        return [
-            'anonymous_id' => self::anonymous_id(),
-            'checkout_id' => self::checkout_id(),
-            'session_id' => function_exists('WC') && WC()->session ? (string) WC()->session->get_customer_id() : self::anonymous_id(),
-        ];
+        $session = function_exists('WC') ? WC()->session : null;
+        $identity = $session ? $session->get('adoology_checkout_identity') : null;
+        $cookie_checkout = isset($_COOKIE[self::COOKIE_CHECKOUT]) ? sanitize_text_field(wp_unslash($_COOKIE[self::COOKIE_CHECKOUT])) : '';
+        if (!is_array($identity) || !self::is_uuid($identity['anonymous_id'] ?? '') || !self::is_uuid($identity['checkout_id'] ?? '') || !self::is_uuid($identity['session_id'] ?? '')) {
+            // Concurrent token/cart requests must derive the same initial tuple.
+            $seed = get_current_blog_id() . '|' . ($session ? $session->get_customer_id() : self::anonymous_id());
+            $identity = [
+                'anonymous_id' => self::identity_uuid('anonymous|' . $seed),
+                'checkout_id' => self::is_uuid($cookie_checkout) ? $cookie_checkout : self::identity_uuid('checkout|' . $seed),
+                'session_id' => self::identity_uuid('session|' . $seed),
+            ];
+        } elseif (self::is_uuid($cookie_checkout) && self::accepted_order_id($identity['checkout_id']) && !self::accepted_order_id($cookie_checkout)) {
+            $identity['checkout_id'] = $cookie_checkout;
+        }
+        // Only a fresh checkout-token request can start another checkout generation.
+        while ($renew && self::accepted_order_id($identity['checkout_id'])) {
+            $identity['checkout_id'] = self::identity_uuid('next|' . $identity['checkout_id']);
+        }
+        if ($session) {
+            $session->set('adoology_checkout_identity', $identity);
+            if (method_exists($session, 'set_customer_session_cookie')) {
+                $session->set_customer_session_cookie(true);
+            }
+        }
+        if ($renew) {
+            self::set_cookie(self::COOKIE_ANON, $identity['anonymous_id'], time() + YEAR_IN_SECONDS);
+            self::set_cookie(self::COOKIE_CHECKOUT, $identity['checkout_id'], time() + 7 * DAY_IN_SECONDS);
+        }
+
+        return $identity;
+    }
+
+    private static function identity_uuid($seed)
+    {
+        $hash = hash_hmac('sha256', $seed, wp_salt('nonce'));
+
+        return substr($hash, 0, 8) . '-' . substr($hash, 8, 4) . '-4' . substr($hash, 13, 3) . '-a' . substr($hash, 17, 3) . '-' . substr($hash, 20, 12);
     }
 
     /**
@@ -1011,26 +1248,6 @@ class IncompleteOrders
     }
 
     /**
-     * Minimized contact snapshot for backend recovery workflows.
-     *
-     * @param  string  $payload  Encrypted customer data.
-     * @param  string  $checkout_id  Checkout UUID.
-     * @return array
-     */
-    private static function contact_payload($payload, $checkout_id)
-    {
-        $data = self::customer_payload($payload, $checkout_id);
-        $contact = [];
-        foreach (['name', 'phone', 'email', 'address', 'city', 'postcode', 'country'] as $field) {
-            if (isset($data[$field]) && is_string($data[$field]) && $data[$field] !== '') {
-                $contact[$field] = mb_substr($data[$field], 0, $field === 'address' ? 500 : 190);
-            }
-        }
-
-        return $contact;
-    }
-
-    /**
      * Build trusted product details for an incomplete checkout event.
      *
      * @param  array  $row  Stored checkout row.
@@ -1124,30 +1341,6 @@ class IncompleteOrders
     }
 
     /**
-     * Whether freshly captured contact details add usable recovery data.
-     *
-     * @param  string  $stored  Encrypted stored customer data.
-     * @param  string  $checkout_id  Checkout UUID.
-     * @param  array  $incoming  Sanitized incoming customer fields.
-     * @return bool
-     */
-    private static function customer_changed($stored, $checkout_id, $incoming)
-    {
-        $previous = self::contact_payload($stored, $checkout_id);
-        $fresh = self::public_customer($incoming);
-        if ($fresh === []) {
-            return false;
-        }
-        foreach (['name', 'phone', 'email'] as $field) {
-            if (isset($fresh[$field]) && ($previous[$field] ?? '') !== $fresh[$field]) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
      * Public subset of sanitized customer fields safe for event payloads.
      *
      * @param  array  $customer  Sanitized customer fields.
@@ -1157,7 +1350,7 @@ class IncompleteOrders
     {
         $contact = [];
         foreach (['name', 'phone', 'email', 'address', 'city', 'postcode', 'country'] as $field) {
-            if (isset($customer[$field]) && is_string($customer[$field]) && $customer[$field] !== '') {
+            if (isset($customer[$field]) && is_string($customer[$field])) {
                 $contact[$field] = $customer[$field];
             }
         }
@@ -1172,8 +1365,8 @@ class IncompleteOrders
         }
         $safe = [];
         foreach (['name', 'phone', 'email', 'address', 'city', 'postcode', 'country'] as $field) {
-            if (isset($customer[$field]) && $customer[$field] !== '') {
-                $safe[$field] = substr(sanitize_text_field((string) $customer[$field]), 0, $field === 'address' ? 500 : 190);
+            if (isset($customer[$field]) && is_scalar($customer[$field])) {
+                $safe[$field] = substr(trim(sanitize_text_field((string) $customer[$field])), 0, $field === 'address' ? 500 : 190);
             }
         }
         if (isset($customer['anonymous_id'])) {
@@ -1430,11 +1623,6 @@ class IncompleteOrders
         $path = isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '/';
 
         return home_url($path);
-    }
-
-    private static function rotate_checkout_id()
-    {
-        self::set_cookie(self::COOKIE_CHECKOUT, wp_generate_uuid4(), time() + 7 * DAY_IN_SECONDS);
     }
 
     private static function set_cookie($name, $value, $expires)
