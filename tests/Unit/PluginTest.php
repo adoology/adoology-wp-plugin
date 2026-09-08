@@ -43,6 +43,27 @@ class PluginTest extends TestCase
     }
 
     /**
+     * @covers ::ensure_schedules
+     */
+    public function test_ensure_schedules_replaces_hourly_incomplete_order_lifecycle()
+    {
+        $scheduled = [];
+        when('wp_next_scheduled')->justReturn(123);
+        when('wp_get_schedule')->justReturn('hourly');
+        when('wp_schedule_event')->alias(function ($timestamp, $recurrence, $hook) use (&$scheduled) {
+            $scheduled = compact('timestamp', 'recurrence', 'hook');
+
+            return true;
+        });
+
+        Plugin::ensure_schedules();
+
+        $this->assertGreaterThan(time(), $scheduled['timestamp']);
+        $this->assertSame('adoology_five_minutes', $scheduled['recurrence']);
+        $this->assertSame('adoology_incomplete_order_lifecycle', $scheduled['hook']);
+    }
+
+    /**
      * @covers ::action_links
      */
     public function test_action_links_prepends_dashboard()

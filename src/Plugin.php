@@ -111,8 +111,9 @@ final class Plugin
         if (!wp_next_scheduled(Events::CLEANUP_HOOK)) {
             wp_schedule_event(time() + DAY_IN_SECONDS, 'daily', Events::CLEANUP_HOOK);
         }
-        if (!wp_next_scheduled(IncompleteOrders::LIFECYCLE_HOOK)) {
-            wp_schedule_event(time() + 5 * MINUTE_IN_SECONDS, 'hourly', IncompleteOrders::LIFECYCLE_HOOK);
+        if (wp_get_schedule(IncompleteOrders::LIFECYCLE_HOOK) !== 'adoology_five_minutes') {
+            Scheduler::unschedule_hook(IncompleteOrders::LIFECYCLE_HOOK);
+            wp_schedule_event(time() + 5 * MINUTE_IN_SECONDS, 'adoology_five_minutes', IncompleteOrders::LIFECYCLE_HOOK);
         }
     }
 
