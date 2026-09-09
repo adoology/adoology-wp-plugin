@@ -289,7 +289,11 @@ class Connection
         $result = ApiClient::get_connection($connection_id);
         if (is_wp_error($result)) {
             if (ApiClient::error_status($result) === 404) {
-                self::cleanup_local(false);
+                // Record the missing state but keep local credentials and
+                // sync state: a 404 may simply mean the configured workspace
+                // key points at the wrong workspace, and destroying the live
+                // connection for that would be irreversible. Only explicit
+                // disconnect or uninstall performs cleanup.
                 Options::update('adoology_connection_state', [
                     'status' => 'missing',
                     'checked_at' => gmdate('Y-m-d H:i:s'),

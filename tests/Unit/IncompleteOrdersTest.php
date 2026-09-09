@@ -303,4 +303,109 @@ class IncompleteOrdersTest extends TestCase
         ], $identity);
         unset($GLOBALS['wpdb']);
     }
+
+    public function test_stored_identity_requires_matching_signed_proof()
+    {
+        $anonymous_id = '12345678-1234-4234-8234-123456789abc';
+        $checkout_id = '22345678-1234-4234-8234-123456789abc';
+        $session_id = '32345678-1234-4234-8234-123456789abc';
+        $context = base64_encode(wp_json_encode([
+            'flow' => 'order_form',
+            'product_id' => 30,
+            'instance' => '42345678-1234-4234-8234-123456789abc',
+            'landing_page' => 'https://woo.test/order',
+            'expires' => time() + HOUR_IN_SECONDS,
+        ]));
+        $expires = time() + HOUR_IN_SECONDS;
+        $message = $anonymous_id . '|' . $checkout_id . '|' . $session_id . '|' . hash('sha256', $context) . '|' . $expires;
+
+        when('wp_salt')->justReturn('test-nonce-secret');
+        when('wp_generate_password')->justReturn('0123456789abcdef0123456789abcdef');
+        when('get_current_blog_id')->justReturn(1);
+        when('wp_generate_uuid4')->justReturn('72345678-1234-4234-8234-123456789abc');
+        when('wp_unslash')->returnArg();
+        when('WC')->justReturn((object) ['session' => null]);
+        $_COOKIE[IncompleteOrders::COOKIE_ANON] = '82345678-1234-4234-8234-123456789abc';
+        $_COOKIE[IncompleteOrders::COOKIE_CHECKOUT] = '92345678-1234-4234-8234-123456789abc';
+        $encryptedCustomer = \Adoology\Crypto::encrypt(wp_json_encode(['anonymous_id' => $anonymous_id]), 'adoology_checkout_' . $checkout_id);
+
+        $makeWpdb = static fn (): object => new class($encryptedCustomer, $session_id)
+        {
+            public $prefix = 'wp_';
+
+            public function __construct(private string $customerData, private string $sessionId) {}
+
+            public function prepare($query, ...$values)
+            {
+                return $query;
+            }
+
+            public function get_row($query, $format)
+            {
+                return ['session_id' => $this->sessionId, 'customer_data' => $this->customerData];
+            }
+        };
+
+        $GLOBALS['wpdb'] = $makeWpdb();
+
+        $stored = IncompleteOrders::identity_for_checkout($checkout_id, [
+            'anonymous_id' => $anonymous_id,
+            'session_id' => $session_id,
+            'capture_token' => $expires . '.' . hash_hmac('sha256', $message, 'test-nonce-secret'),
+            'capture_context' => $context,
+            'capture_signature' => hash_hmac('sha256', $context, 'test-nonce-secret'),
+        ], 30);
+        $this->assertSame($anonymous_id, $stored['anonymous_id']);
+
+        // A caller holding only the checkout UUID must not recover the
+        // stored identity.
+        $proofless = IncompleteOrders::identity_for_checkout($checkout_id, [], 30);
+        $this->assertNotSame($anonymous_id, $proofless['anonymous_id']);
+
+        // Even valid proof carrying different ids must not claim the row.
+        $foreign = '52345678-1234-4234-8234-123456789abc';
+        $foreignSession = '62345678-1234-4234-8234-123456789abc';
+        $foreignMessage = $foreign . '|' . $checkout_id . '|' . $foreignSession . '|' . hash('sha256', $context) . '|' . $expires;
+        $hijack = IncompleteOrders::identity_for_checkout($checkout_id, [
+            'anonymous_id' => $foreign,
+            'session_id' => $foreignSession,
+            'capture_token' => $expires . '.' . hash_hmac('sha256', $foreignMessage, 'test-nonce-secret'),
+            'capture_context' => $context,
+            'capture_signature' => hash_hmac('sha256', $context, 'test-nonce-secret'),
+        ], 30);
+        $this->assertNotSame($anonymous_id, $hijack['anonymous_id']);
+
+        unset($GLOBALS['wpdb'], $_COOKIE[IncompleteOrders::COOKIE_ANON], $_COOKIE[IncompleteOrders::COOKIE_CHECKOUT]);
+    }
+
+
+    public function test_client_identifier_prefers_customer_then_ip_over_cookies()
+    {
+        when('wp_salt')->justReturn('test-nonce-secret');
+        when('wp_unslash')->returnArg();
+
+        $session = new class
+        {
+            public function get_customer_id()
+            {
+                return 42;
+            }
+        };
+
+        $woo = (object) ['session' => $session];
+        when('WC')->justReturn($woo);
+        $this->assertSame('customer:42', IncompleteOrders::client_identifier());
+
+        when('WC')->justReturn((object) ['session' => null]);
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.10';
+        $ipSubject = IncompleteOrders::client_identifier();
+        $this->assertStringStartsWith('ip:', $ipSubject);
+
+        // Clearing cookies does not change the IP-bound subject.
+        $_COOKIE[IncompleteOrders::COOKIE_ANON] = '82345678-1234-4234-8234-123456789abc';
+        $this->assertSame($ipSubject, IncompleteOrders::client_identifier());
+
+        unset($_SERVER['REMOTE_ADDR'], $_COOKIE[IncompleteOrders::COOKIE_ANON]);
+    }
 }
+

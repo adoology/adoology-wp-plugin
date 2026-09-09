@@ -235,11 +235,7 @@ class IncompleteOrders
         if (!$enabled || !is_array($context) || !self::is_same_origin($request) || !self::allow_capture_request('token:' . self::client_ip())) {
             return new WP_Error('adoology_capture_forbidden', __('Checkout capture request was rejected.', 'adoology-connector'), ['status' => 403]);
         }
-        $identity = $context['flow'] === 'checkout' ? self::identity(true) : [
-            'anonymous_id' => wp_generate_uuid4(),
-            'checkout_id' => wp_generate_uuid4(),
-            'session_id' => wp_generate_uuid4(),
-        ];
+        $identity = $context['flow'] === 'checkout' ? self::identity(true) : self::identity_for_flow();
         $anonymous_id = $identity['anonymous_id'];
         $checkout_id = $identity['checkout_id'];
         $session_id = $identity['session_id'];
@@ -665,14 +661,16 @@ class IncompleteOrders
      * @param  string  $checkout_id  Checkout UUID.
      * @param  int  $order_id  Order ID.
      * @param  WC_Order|null  $order  Order.
+     * @param  int  $attempt  Retry attempt.
+     * @param  string  $acting_anonymous_id  Identity of the submitting browser.
      */
-    public static function mark_complete($checkout_id, $order_id, $order = null, $attempt = 0)
+    public static function mark_complete($checkout_id, $order_id, $order = null, $attempt = 0, $acting_anonymous_id = '')
     {
         if (!self::is_uuid($checkout_id)) {
             return;
         }
         try {
-            $result = self::with_checkout_lock($checkout_id, function () use ($checkout_id, $order_id) {
+            $result = self::with_checkout_lock($checkout_id, function () use ($checkout_id, $order_id, $acting_anonymous_id) {
                 global $wpdb;
 
                 $order = wc_get_order($order_id);
@@ -681,6 +679,18 @@ class IncompleteOrders
                 }
                 $table = Database::incomplete_table();
                 $row = $wpdb->get_row($wpdb->prepare("SELECT id, status, session_id, customer_data FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
+
+                // A stored checkout only links to an order submitted with its
+                // own identity; a known UUID alone must not hijack someone
+                // else's checkout correlation.
+                if (is_array($row)) {
+                    $customer = self::customer_payload((string) $row['customer_data'], $checkout_id);
+                    $stored_anonymous_id = is_string($customer['anonymous_id'] ?? null) ? (string) $customer['anonymous_id'] : '';
+                    if (self::is_uuid($stored_anonymous_id) && self::is_uuid($acting_anonymous_id) && !hash_equals($stored_anonymous_id, $acting_anonymous_id)) {
+                        return new WP_Error('adoology_checkout_identity_mismatch', 'Checkout belongs to a different session.');
+                    }
+                }
+
                 $accepted_key = '_adoology_checkout_accepted_' . $checkout_id;
                 $event_key = '_adoology_checkout_completion_' . $checkout_id;
                 $order->update_meta_data('_adoology_checkout_id', $checkout_id);
@@ -697,7 +707,15 @@ class IncompleteOrders
                         $event = 'untracked';
                         if (Options::get('adoology_tracking_enabled', 'no') === 'yes' || !empty($row['customer_data'])) {
                             $status = $row && in_array($row['status'], ['incomplete', 'submitting_recovery', 'recovered'], true) ? 'recovered' : 'converted';
-                            $identity = self::identity_for_checkout($checkout_id);
+                            // The completion event reports the identity stored
+                            // on the row itself; proof-less recovery is not
+                            // trusted here.
+                            $rowCustomer = self::customer_payload((string) ($row['customer_data'] ?? ''), $checkout_id);
+                            $rowAnonymous = is_string($rowCustomer['anonymous_id'] ?? null) ? (string) $rowCustomer['anonymous_id'] : '';
+                            $rowSession = is_array($row) && self::is_uuid((string) $row['session_id']) ? (string) $row['session_id'] : '';
+                            $identity = self::is_uuid($rowAnonymous) && $rowSession !== ''
+                                ? ['anonymous_id' => $rowAnonymous, 'checkout_id' => $checkout_id, 'session_id' => $rowSession]
+                                : self::identity_for_checkout($checkout_id);
                             $event = Events::enqueue('checkout.' . $status, $identity['anonymous_id'], $identity['session_id'], [
                                 'checkout_id' => $checkout_id,
                                 'order_id' => (int) $order_id,
@@ -980,6 +998,24 @@ class IncompleteOrders
     }
 
     /**
+     * Deterministic identity for the landing order-form flow, seeded by the
+     * stable anonymous cookie so a regenerated page keeps the same triple
+     * instead of losing correlation.
+     *
+     * @return array{anonymous_id: string, checkout_id: string, session_id: string}
+     */
+    private static function identity_for_flow()
+    {
+        $seed = get_current_blog_id() . '|' . self::anonymous_id();
+
+        return [
+            'anonymous_id' => self::identity_uuid('flow-anon|' . $seed),
+            'checkout_id' => self::identity_uuid('flow-checkout|' . $seed),
+            'session_id' => self::identity_uuid('flow-session|' . $seed),
+        ];
+    }
+
+    /**
      * Recover identity already stored for one captured checkout.
      *
      * @param  string  $checkout_id  Checkout UUID.
@@ -1001,13 +1037,6 @@ class IncompleteOrders
         $customer = is_array($row) ? self::customer_payload((string) $row['customer_data'], $checkout_id) : [];
         $anonymous_id = is_string($customer['anonymous_id'] ?? null) ? $customer['anonymous_id'] : '';
         $session_id = is_array($row) ? (string) $row['session_id'] : '';
-        if (self::is_uuid($anonymous_id) && self::is_uuid($session_id)) {
-            return [
-                'anonymous_id' => $anonymous_id,
-                'checkout_id' => $checkout_id,
-                'session_id' => $session_id,
-            ];
-        }
 
         $submitted_anonymous_id = sanitize_text_field((string) ($submitted['anonymous_id'] ?? ''));
         $submitted_session_id = sanitize_text_field((string) ($submitted['session_id'] ?? ''));
@@ -1015,9 +1044,26 @@ class IncompleteOrders
         $encoded_context = sanitize_text_field((string) ($submitted['capture_context'] ?? ''));
         $signature = sanitize_text_field((string) ($submitted['capture_signature'] ?? ''));
         $context = self::verify_capture_context($encoded_context, $signature);
-        if (self::is_uuid($submitted_anonymous_id) && self::is_uuid($submitted_session_id) && is_array($context) &&
-            $context['flow'] === 'order_form' && (int) $context['product_id'] === (int) $product_id &&
-            self::verify_capture_token($token, $submitted_anonymous_id, $checkout_id, $submitted_session_id, $encoded_context)) {
+        $proof_valid = self::is_uuid($submitted_anonymous_id) && self::is_uuid($submitted_session_id) && is_array($context)
+            && $context['flow'] === 'order_form' && (int) $context['product_id'] === (int) $product_id
+            && self::verify_capture_token($token, $submitted_anonymous_id, $checkout_id, $submitted_session_id, $encoded_context);
+
+        if (self::is_uuid($anonymous_id) && self::is_uuid($session_id)) {
+            // The stored identity is only recoverable with valid signed proof
+            // that carries the very same ids; knowing the checkout UUID alone
+            // is not ownership.
+            if ($proof_valid && hash_equals($anonymous_id, $submitted_anonymous_id) && hash_equals($session_id, $submitted_session_id)) {
+                return [
+                    'anonymous_id' => $anonymous_id,
+                    'checkout_id' => $checkout_id,
+                    'session_id' => $session_id,
+                ];
+            }
+
+            return self::identity();
+        }
+
+        if ($proof_valid) {
             return [
                 'anonymous_id' => $submitted_anonymous_id,
                 'checkout_id' => $checkout_id,
@@ -1087,6 +1133,9 @@ class IncompleteOrders
 
     /**
      * Stable request limiter subject without trusting forwarded IP headers.
+     * Logged-in customers bind to their account id; otherwise the client IP
+     * is preferred so clearing cookies cannot reset the component, and
+     * cookie-backed identifiers are last resorts.
      *
      * @return string
      */
@@ -1094,13 +1143,26 @@ class IncompleteOrders
     {
         if (function_exists('WC') && WC()->session) {
             $session_id = (string) WC()->session->get_customer_id();
-            if ($session_id !== '') {
-                return $session_id;
+            if ($session_id !== '' && (int) $session_id > 0) {
+                return 'customer:' . $session_id;
             }
         }
+
+        $ip = self::client_ip();
+        if ($ip !== '') {
+            return 'ip:' . hash_hmac('sha256', $ip, wp_salt('nonce'));
+        }
+
+        if (function_exists('WC') && WC()->session) {
+            $session_id = (string) WC()->session->get_customer_id();
+            if ($session_id !== '') {
+                return 'session:' . $session_id;
+            }
+        }
+
         $anonymous_id = isset($_COOKIE[self::COOKIE_ANON]) ? sanitize_text_field(wp_unslash($_COOKIE[self::COOKIE_ANON])) : '';
 
-        return self::is_uuid($anonymous_id) ? $anonymous_id : self::client_ip();
+        return self::is_uuid($anonymous_id) ? $anonymous_id : 'unknown';
     }
 
     /**
