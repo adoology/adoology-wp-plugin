@@ -579,7 +579,7 @@ class Connection
         foreach ($rows as $row) {
             $description = (string) $row['description'];
             $managed = $description === self::KEY_DESCRIPTION ||
-                (bool) preg_match('/^Adoology Connector [0-9A-HJKMNP-TV-Z]{26}$/D', $description) ||
+                (bool) preg_match('/^Adoology Connector [0-9A-HJKMNP-TV-Z]{26}(?: - API \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\))?$/D', $description) ||
                 (bool) preg_match('/^Adoology - API \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\)$/D', $description);
             if ($managed) {
                 $wpdb->delete($table, ['key_id' => (int) $row['key_id'], 'description' => $description], ['%d', '%s']);

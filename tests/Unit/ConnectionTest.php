@@ -10,6 +10,8 @@ use Adoology\Connection;
 use Adoology\Crypto;
 use Adoology\Options;
 use Adoology\Tests\TestCase;
+use Mockery;
+use ReflectionMethod;
 
 use function Brain\Monkey\Functions\when;
 
@@ -214,5 +216,39 @@ class ConnectionTest extends TestCase
         $this->assertTrue(Crypto::set_secret('adoology_webhook_secret', $webhook_secret));
         $this->assertSame($authorization_url, Connection::connect());
         $this->assertSame(2, $requests);
+    }
+
+    /**
+     * @covers ::delete_managed_api_keys
+     */
+    public function test_delete_managed_api_keys_removes_native_suffixed_key_descriptions()
+    {
+        global $wpdb;
+
+        $wpdb = Mockery::mock();
+        $wpdb->prefix = 'wp_';
+        $wpdb->shouldReceive('esc_like')->andReturnUsing(static fn ($value): string => addcslashes((string) $value, '_%\\'));
+        $wpdb->shouldReceive('prepare')->andReturnUsing(static fn (string $sql): string => $sql);
+        $wpdb->shouldReceive('get_results')->andReturn([
+            ['key_id' => 7, 'description' => 'Adoology Connector 01ARZ3NDEKTSV4RRFFQ69G5FAV - API (2026-09-09 10:00:00)'],
+            ['key_id' => 8, 'description' => 'Adoology Connector 01ARZ3NDEKTSV4RRFFQ69G5FAV'],
+            ['key_id' => 9, 'description' => 'Adoology - API (2026-01-01 00:00:00)'],
+            ['key_id' => 10, 'description' => 'Some other plugin key'],
+        ]);
+
+        $deleted = [];
+        $wpdb->shouldReceive('delete')->andReturnUsing(static function ($table, $where) use (&$deleted) {
+            $deleted[] = $where;
+
+            return 1;
+        });
+
+        when('get_option')->justReturn(false);
+
+        $method = new ReflectionMethod(Connection::class, 'delete_managed_api_keys');
+        $method->setAccessible(true);
+        $method->invoke(null);
+
+        $this->assertSame([7, 8, 9], array_column($deleted, 'key_id'));
     }
 }
