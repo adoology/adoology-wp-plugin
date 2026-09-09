@@ -290,9 +290,6 @@ class OrderForm
             $order->calculate_totals();
             $order->save();
             do_action('woocommerce_checkout_order_created', $order);
-            if (function_exists('wc_reserve_stock_for_order') && $order->needs_payment()) {
-                wc_reserve_stock_for_order($order);
-            }
             if (Fraud::enabled()) {
                 Fraud::enforce_order_assessment($order);
             }

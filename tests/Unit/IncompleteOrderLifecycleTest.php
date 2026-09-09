@@ -1172,7 +1172,10 @@ class IncompleteOrderLifecycleTest extends TestCase
         when('sanitize_email')->returnArg();
         when('get_current_user_id')->justReturn(0);
         expect('wc_create_order')->once()->with(['customer_id' => 0])->andReturn($order);
-        when('wc_reserve_stock_for_order')->justReturn(null);
+        // WP-F23 regression: the native woocommerce_checkout_order_created hook owns
+        // reservation; an explicit wc_reserve_stock_for_order call double-reserves and
+        // rejects legitimate in-stock orders.
+        expect('wc_reserve_stock_for_order')->never();
         $delivery = base64_encode(wp_json_encode(['standard' => ['label' => 'Standard', 'cost' => 0]]));
         $_POST = [
             '_adoology_nonce' => 'valid', '_adoology_checkout_id' => $checkout_id,
