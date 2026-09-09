@@ -26,6 +26,40 @@ class Database
         $events = self::events_table();
         $incomplete = self::incomplete_table();
 
+        self::maybe_create_tables($wpdb, $charset_collate, $events, $incomplete);
+
+        $retention_index = $wpdb->get_var($wpdb->prepare("SHOW INDEX FROM {$incomplete} WHERE Key_name = %s", 'retention'));
+        if (!$retention_index) {
+            $wpdb->query("ALTER TABLE {$incomplete} ADD KEY retention (status, updated_at)");
+        }
+
+        // Only advance the recorded version once both tables provably
+        // exist; a failed DDL must keep retrying upgrades instead of
+        // marking itself done.
+        if (self::tables_exist($wpdb, [$events, $incomplete])) {
+            Options::update('adoology_db_version', self::VERSION);
+
+            return;
+        }
+
+        Logger::log('error', 'Adoology schema installation failed.', [
+            'expected' => [$events, $incomplete],
+        ]);
+    }
+
+    private static function tables_exist($wpdb, $tables)
+    {
+        foreach ($tables as $table) {
+            if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static function maybe_create_tables($wpdb, $charset_collate, $events, $incomplete)
+    {
         dbDelta("CREATE TABLE {$events} (
             id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
             event_id char(26) NOT NULL,
@@ -75,13 +109,6 @@ class Database
             KEY order_id (order_id),
             KEY expires_at (expires_at)
         ) {$charset_collate};");
-
-        $retention_index = $wpdb->get_var($wpdb->prepare("SHOW INDEX FROM {$incomplete} WHERE Key_name = %s", 'retention'));
-        if (!$retention_index) {
-            $wpdb->query("ALTER TABLE {$incomplete} ADD KEY retention (status, updated_at)");
-        }
-
-        Options::update('adoology_db_version', self::VERSION);
     }
 
     /**
