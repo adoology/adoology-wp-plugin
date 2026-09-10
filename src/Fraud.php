@@ -63,7 +63,7 @@ class Fraud
         $data['honeypot'] = isset($_POST['adoology_website']) ? sanitize_text_field(wp_unslash($_POST['adoology_website'])) : '';
         self::$assessment = self::evaluate($data, self::cart_product_ids(), true);
         if (self::$assessment['action'] === 'block') {
-            $errors->add('adoology_risk_blocked', __('We could not accept this order. Please contact the store for assistance.', 'adoology-connector'));
+            $errors->add('adoology_risk_blocked', self::rejection_message(self::$assessment));
         }
     }
 
@@ -118,7 +118,7 @@ class Fraud
         if ($assessment['action'] === 'block' && class_exists('Automattic\\WooCommerce\\StoreApi\\Exceptions\\RouteException')) {
             throw new RouteException(
                 'adoology_risk_blocked',
-                __('We could not accept this order. Please contact the store for assistance.', 'adoology-connector'),
+                self::rejection_message($assessment),
                 403
             );
         }
@@ -178,7 +178,10 @@ class Fraud
             $signals[] = 'ip_velocity';
         }
 
-        if (($phone !== '' || $email !== '') && self::has_recent_duplicate($raw_phone, $phone, $email, $product_ids)) {
+        if (($phone !== '' || $email !== '') && self::has_blocking_duplicate($raw_phone, $phone, $email)) {
+            $score = 100;
+            $signals[] = 'duplicate_order_block';
+        } elseif (($phone !== '' || $email !== '') && self::has_recent_duplicate($raw_phone, $phone, $email, $product_ids)) {
             $score += 45;
             $signals[] = 'duplicate_order';
         }
@@ -204,6 +207,21 @@ class Fraud
     public static function enabled()
     {
         return Options::get('adoology_fraud_enabled', 'yes') === 'yes';
+    }
+
+    /**
+     * Customer-facing rejection message for a blocked assessment.
+     *
+     * @param  array  $assessment  Risk assessment.
+     * @return string
+     */
+    public static function rejection_message($assessment)
+    {
+        if (in_array('duplicate_order_block', (array) ($assessment['signals'] ?? []), true)) {
+            return __('You recently placed an order. Please wait a few minutes before placing another.', 'adoology-connector');
+        }
+
+        return __('We could not accept this order. Please contact the store for assistance.', 'adoology-connector');
     }
 
     /**
@@ -338,6 +356,55 @@ class Fraud
                 if (in_array((int) $item->get_product_id(), array_map('intval', $product_ids), true)) {
                     return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the same contact placed any recent order inside the hard-block window.
+     *
+     * @param  string  $raw_phone  Raw billing phone.
+     * @param  string  $phone  Normalized billing phone.
+     * @param  string  $email  Billing email.
+     * @return bool
+     */
+    private static function has_blocking_duplicate($raw_phone, $phone, $email)
+    {
+        if (!function_exists('wc_get_orders')) {
+            return false;
+        }
+        $minutes = (int) Options::get('adoology_duplicate_block_minutes', 5);
+        if ($minutes <= 0) {
+            return false;
+        }
+        $minutes = min(1440, $minutes);
+        $base_args = [
+            'limit' => 1,
+            'return' => 'ids',
+            'status' => ['pending', 'processing', 'on-hold', 'completed'],
+            'date_created' => '>' . (time() - $minutes * MINUTE_IN_SECONDS),
+        ];
+        foreach (array_values(array_unique(array_filter([$raw_phone, $phone]))) as $phone_value) {
+            $args = $base_args;
+            $args['billing_phone'] = $phone_value;
+            if (!empty(wc_get_orders($args))) {
+                return true;
+            }
+        }
+        if ($email !== '') {
+            $args = $base_args;
+            $args['billing_email'] = $email;
+            if (!empty(wc_get_orders($args))) {
+                return true;
+            }
+        }
+        if ($phone !== '') {
+            $args = $base_args;
+            $args['meta_query'] = [['key' => '_adoology_normalized_phone', 'value' => $phone, 'compare' => '=']];
+            if (!empty(wc_get_orders($args))) {
+                return true;
             }
         }
 

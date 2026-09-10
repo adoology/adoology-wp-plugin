@@ -322,6 +322,7 @@ They contain random UUIDs, not contact details.
 ```text
 checkout.started
 checkout.incomplete
+checkout.expired
 checkout.converted
 checkout.recovered
 ```

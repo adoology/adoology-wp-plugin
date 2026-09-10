@@ -112,9 +112,11 @@ class IncompleteOrderLifecycleTest extends TestCase
         when('wc_load_cart')->justReturn(null);
         when('wc_get_price_decimals')->justReturn(2);
         when('get_woocommerce_currency')->justReturn('BDT');
+        when('wp_get_attachment_image_url')->alias(fn ($id) => 'https://woo.test/wp-content/uploads/img-' . $id . '-300x300.png');
         when('wc_get_product')->alias(function ($id) {
             $product = Mockery::mock();
             $product->shouldReceive('get_name')->andReturn($id === 31 ? 'Cotton Shirt - Blue' : 'Leather Wallet');
+            $product->shouldReceive('get_image_id')->andReturn($id === 31 ? 55 : 66);
             $product->shouldReceive('get_price')->andReturn('12.50');
             $product->shouldReceive('get_parent_id')->andReturn(30);
             $product->shouldReceive('get_type')->andReturn($id === 31 ? 'variation' : 'simple');
@@ -189,11 +191,44 @@ class IncompleteOrderLifecycleTest extends TestCase
         $this->assertSame($this->snapshot()['customer'], $events[0]['properties']['customer']);
         $this->assertSame(2500, $events[0]['properties']['value_minor']);
         $this->assertSame('Cotton Shirt - Blue', $events[0]['properties']['product_name']);
+        $this->assertSame('https://woo.test/wp-content/uploads/img-55-300x300.png', $events[0]['properties']['product_image']);
         $this->assertSame([
-            ['product_id' => 30, 'variation_id' => 31, 'quantity' => 2, 'product_name' => 'Cotton Shirt - Blue'],
-            ['product_id' => 40, 'variation_id' => 0, 'quantity' => 1, 'product_name' => 'Leather Wallet'],
+            ['product_id' => 30, 'variation_id' => 31, 'quantity' => 2, 'product_name' => 'Cotton Shirt - Blue', 'product_image' => 'https://woo.test/wp-content/uploads/img-55-300x300.png'],
+            ['product_id' => 40, 'variation_id' => 0, 'quantity' => 1, 'product_name' => 'Leather Wallet', 'product_image' => 'https://woo.test/wp-content/uploads/img-66-300x300.png'],
         ], $events[0]['properties']['items']);
         $this->assertContains('COMMIT', $this->db->operations);
+    }
+
+    public function test_expiring_checkout_enqueues_terminal_event_that_survives_purge()
+    {
+        $this->assertTrue(IncompleteOrders::store_snapshot(self::CHECKOUT, $this->snapshot()));
+        foreach (array_keys($this->db->rows[Database::incomplete_table()]) as $id) {
+            $this->db->rows[Database::incomplete_table()][$id]['expires_at'] = gmdate('Y-m-d H:i:s', time() - MINUTE_IN_SECONDS);
+        }
+
+        IncompleteOrders::advance_lifecycle();
+
+        $this->assertNull($this->row());
+        $events = $this->events();
+        $this->assertCount(1, $events);
+        $this->assertSame('checkout.expired', $events[0]['name']);
+        $this->assertSame(self::ANONYMOUS, $events[0]['anonymous_id']);
+        $this->assertSame(self::SESSION, $events[0]['session_id']);
+        $this->assertSame(self::CHECKOUT, $events[0]['properties']['checkout_id']);
+    }
+
+    public function test_expiring_checkout_skips_terminal_event_when_tracking_disabled()
+    {
+        $this->assertTrue(IncompleteOrders::store_snapshot(self::CHECKOUT, $this->snapshot()));
+        foreach (array_keys($this->db->rows[Database::incomplete_table()]) as $id) {
+            $this->db->rows[Database::incomplete_table()][$id]['expires_at'] = gmdate('Y-m-d H:i:s', time() - MINUTE_IN_SECONDS);
+        }
+        $this->options['adoology_tracking_enabled'] = 'no';
+
+        IncompleteOrders::advance_lifecycle();
+
+        $this->assertNull($this->row());
+        $this->assertSame([], $this->events());
     }
 
     public function test_absent_contact_fields_merge_without_duplicate_row_or_unchanged_event()
@@ -247,7 +282,7 @@ class IncompleteOrderLifecycleTest extends TestCase
                 'name' => 'Ada Lovelace', 'phone' => '+8801712345678', 'email' => 'ada@example.test', 'address' => '2 New Road',
             ]],
             'cart membership only' => [['items' => [['product_id' => 40, 'quantity' => 3]]], 'items', [
-                ['product_id' => 40, 'variation_id' => 0, 'quantity' => 3, 'product_name' => 'Leather Wallet'],
+                ['product_id' => 40, 'variation_id' => 0, 'quantity' => 3, 'product_name' => 'Leather Wallet', 'product_image' => 'https://woo.test/wp-content/uploads/img-66-300x300.png'],
             ]],
             'quantity only' => [['quantity' => 3], 'quantity', 3],
             'variation only' => [['variation_id' => 0], 'variation_id', 0],
@@ -1472,6 +1507,67 @@ class IncompleteOrderLifecycleWpdb
         return null;
     }
 
+    public function get_results($query, $format = null)
+    {
+        if (!preg_match('/^SELECT (.+) FROM (\w+) WHERE (.+?)(?: ORDER BY (\w+) (ASC|DESC))?(?: LIMIT %d)?$/', $query->sql, $match)) {
+            throw new RuntimeException('Unexpected get_results: ' . $query->sql);
+        }
+        $columns = array_map('trim', explode(',', $match[1]));
+        $conditions = array_map('trim', explode(' AND ', $match[3]));
+        $args = $query->args;
+        $limit = null;
+        if (preg_match('/ LIMIT %d$/', $query->sql)) {
+            $limit = (int) array_pop($args);
+        }
+        $matched = [];
+        foreach ($this->rows[$match[2]] ?? [] as $row) {
+            if ($this->matches_conditions($row, $conditions, $args)) {
+                $matched[] = array_intersect_key($row, array_flip($columns));
+            }
+        }
+        if (!empty($match[4])) {
+            $order_column = $match[4];
+            usort($matched, static fn ($a, $b) => ($a[$order_column] ?? 0) <=> ($b[$order_column] ?? 0));
+            if (($match[5] ?? '') === 'DESC') {
+                $matched = array_reverse($matched);
+            }
+        }
+        if ($limit !== null) {
+            $matched = array_slice($matched, 0, $limit);
+        }
+
+        return $matched;
+    }
+
+    private function matches_conditions($row, $conditions, $args)
+    {
+        $arg_index = 0;
+        foreach ($conditions as $condition) {
+            if (preg_match("/^(\\w+) = '([^']*)'$/", $condition, $m)) {
+                if (($row[$m[1]] ?? null) !== $m[2]) {
+                    return false;
+                }
+            } elseif (preg_match('/^(\\w+) = %s$/', $condition, $m)) {
+                if (($row[$m[1]] ?? null) !== $args[$arg_index++]) {
+                    return false;
+                }
+            } elseif (preg_match('/^(\\w+) IN \\((.+)\\)$/', $condition, $m)) {
+                $values = array_map(static fn ($value) => trim($value, "'"), explode(',', $m[2]));
+                if (!in_array($row[$m[1]] ?? null, $values, true)) {
+                    return false;
+                }
+            } elseif (preg_match('/^(\\w+) < %s$/', $condition, $m)) {
+                if (!((string) ($row[$m[1]] ?? '') < (string) $args[$arg_index++])) {
+                    return false;
+                }
+            } else {
+                throw new RuntimeException('Unexpected condition: ' . $condition);
+            }
+        }
+
+        return true;
+    }
+
     public function query($sql)
     {
         $this->operations[] = $sql;
@@ -1482,11 +1578,24 @@ class IncompleteOrderLifecycleWpdb
             $this->transaction = null;
         } elseif ($sql === 'COMMIT') {
             $this->transaction = null;
+        } elseif (is_object($sql) && preg_match('/^UPDATE (\w+) SET status = CASE /', $sql->sql, $match)) {
+            $this->revert_stuck_submissions($match[1], (string) $sql->args[0], (string) $sql->args[1]);
         } else {
             throw new RuntimeException('Unexpected query: ' . (is_object($sql) ? $sql->sql : $sql));
         }
 
         return 1;
+    }
+
+    private function revert_stuck_submissions($table, $now, $cutoff)
+    {
+        foreach ($this->rows[$table] ?? [] as $id => $row) {
+            if (!in_array($row['status'], ['submitting', 'submitting_recovery'], true) || (int) ($row['order_id'] ?? 0) !== 0 || !((string) $row['updated_at'] < $cutoff)) {
+                continue;
+            }
+            $this->rows[$table][$id]['status'] = $row['status'] === 'submitting_recovery' ? 'incomplete' : 'started';
+            $this->rows[$table][$id]['updated_at'] = $now;
+        }
     }
 
     public function insert($table, $row, $format = [])
