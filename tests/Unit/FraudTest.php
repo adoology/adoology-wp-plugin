@@ -8,6 +8,7 @@ namespace Adoology\Tests\Unit;
 
 use Adoology\Fraud;
 use Adoology\Tests\TestCase;
+use Mockery;
 
 use function Brain\Monkey\Functions\when;
 
@@ -152,5 +153,69 @@ class FraudTest extends TestCase
 
         $this->assertSame(100, $result['score']);
         $this->assertSame('block', $result['action']);
+    }
+
+    /**
+     * @covers ::held_order_needs_payment
+     */
+    public function test_risk_held_on_hold_order_still_needs_payment()
+    {
+        $order = Mockery::mock('WC_Order');
+        $order->shouldReceive('has_status')->with('on-hold')->andReturn(true);
+        $order->shouldReceive('get_total')->andReturn('25.00');
+        $order->shouldReceive('get_meta')->with('_adoology_risk_action', true)->andReturn('hold');
+
+        $this->assertTrue(Fraud::held_order_needs_payment(false, $order));
+    }
+
+    /**
+     * @covers ::held_order_needs_payment
+     */
+    public function test_non_hold_risk_action_does_not_force_payment()
+    {
+        $order = Mockery::mock('WC_Order');
+        $order->shouldReceive('has_status')->with('on-hold')->andReturn(true);
+        $order->shouldReceive('get_total')->andReturn('25.00');
+        $order->shouldReceive('get_meta')->with('_adoology_risk_action', true)->andReturn('allow');
+
+        $this->assertFalse(Fraud::held_order_needs_payment(false, $order));
+    }
+
+    /**
+     * @covers ::held_order_needs_payment
+     */
+    public function test_non_on_hold_status_does_not_force_payment()
+    {
+        $order = Mockery::mock('WC_Order');
+        $order->shouldReceive('has_status')->with('on-hold')->andReturn(false);
+        $order->shouldReceive('get_total')->andReturn('25.00');
+        $order->shouldReceive('get_meta')->with('_adoology_risk_action', true)->andReturn('hold');
+
+        $this->assertFalse(Fraud::held_order_needs_payment(false, $order));
+    }
+
+    /**
+     * @covers ::held_order_needs_payment
+     */
+    public function test_zero_total_held_order_does_not_need_payment()
+    {
+        $order = Mockery::mock('WC_Order');
+        $order->shouldReceive('has_status')->with('on-hold')->andReturn(true);
+        $order->shouldReceive('get_total')->andReturn('0.00');
+
+        $this->assertFalse(Fraud::held_order_needs_payment(false, $order));
+    }
+
+    /**
+     * @covers ::held_order_needs_payment
+     */
+    public function test_existing_needs_payment_result_passes_through()
+    {
+        $order = Mockery::mock('WC_Order');
+        $order->shouldReceive('has_status')->never();
+        $order->shouldReceive('get_total')->never();
+        $order->shouldReceive('get_meta')->never();
+
+        $this->assertTrue(Fraud::held_order_needs_payment(true, $order));
     }
 }

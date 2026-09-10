@@ -155,8 +155,10 @@ class Events
             return;
         }
 
-        $events = [];
-        $ids = [];
+        // Bucket by the frozen channel connection id: a stale generation's
+        // foreign reference must only poison its own group, never a batch of
+        // otherwise-valid events from the current connection.
+        $buckets = [];
         foreach ($rows as $row) {
             $decrypted = Crypto::decrypt((string) $row['payload'], 'adoology_event_' . $row['event_id']);
             $decoded = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
@@ -165,31 +167,33 @@ class Events
 
                 continue;
             }
-            $events[] = $decoded;
-            $ids[] = (int) $row['id'];
-        }
-        if (empty($events)) {
-            return;
+
+            $bucketKey = (string) ($decoded['channel_connection_id'] ?? '');
+            $buckets[$bucketKey]['events'][] = $decoded;
+            $buckets[$bucketKey]['rows'][] = $row;
         }
 
-        $result = ApiClient::ingest_events($events, 'ado-events-' . hash('sha256', implode('-', array_column($events, 'id'))));
-        if (is_wp_error($result)) {
-            foreach ($rows as $row) {
-                if (in_array((int) $row['id'], $ids, true)) {
+        foreach ($buckets as $bucket) {
+            $events = $bucket['events'];
+            $ids = array_map(static fn ($row): int => (int) $row['id'], $bucket['rows']);
+
+            $result = ApiClient::ingest_events($events, 'ado-events-' . hash('sha256', implode('-', array_column($events, 'id'))));
+            if (is_wp_error($result)) {
+                foreach ($bucket['rows'] as $row) {
                     self::mark_failed((int) $row['id'], (int) $row['attempts'], $result->get_error_message(), $lease_token);
                 }
-            }
-            self::schedule_processing(time() + 60, true, $continuation_token);
 
-            return;
+                continue;
+            }
+
+            $sent_placeholders = implode(',', array_fill(0, count($ids), '%d'));
+            $query = $wpdb->prepare(
+                "UPDATE {$table} SET status = 'sent', sent_at = %s, updated_at = %s, last_error = NULL, lease_token = NULL, lease_expires_at = NULL WHERE id IN ({$sent_placeholders}) AND status = 'processing' AND lease_token = %s",
+                array_merge([$now, $now], $ids, [$lease_token])
+            );
+            $wpdb->query($query);
         }
 
-        $sent_placeholders = implode(',', array_fill(0, count($ids), '%d'));
-        $query = $wpdb->prepare(
-            "UPDATE {$table} SET status = 'sent', sent_at = %s, updated_at = %s, last_error = NULL, lease_token = NULL, lease_expires_at = NULL WHERE id IN ({$sent_placeholders}) AND status = 'processing' AND lease_token = %s",
-            array_merge([$now, $now], $ids, [$lease_token])
-        );
-        $wpdb->query($query);
         self::schedule_processing(time() + 1, true, $continuation_token);
     }
 

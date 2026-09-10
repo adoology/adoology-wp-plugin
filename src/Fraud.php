@@ -35,6 +35,7 @@ class Fraud
         add_action('woocommerce_checkout_order_processed', [self::class, 'apply_order_action'], 40, 3);
         add_action('woocommerce_store_api_checkout_update_order_from_request', [self::class, 'protect_store_api'], 30, 2);
         add_action('woocommerce_store_api_checkout_order_processed', [self::class, 'apply_store_api_action'], 40, 1);
+        add_filter('woocommerce_order_needs_payment', [self::class, 'held_order_needs_payment'], 10, 2);
     }
 
     /**
@@ -217,6 +218,30 @@ class Fraud
         $order->update_meta_data('_adoology_risk_action', sanitize_key($assessment['action']));
         $order->update_meta_data('_adoology_risk_signals', wp_json_encode($assessment['signals']));
         $order->update_meta_data('_adoology_normalized_phone', self::normalize_phone($order->get_billing_phone()));
+    }
+
+    /**
+     * Keep risk-held on-hold orders inside the payment branch.
+     *
+     * WooCommerce excludes on-hold from needs-payment statuses, which would
+     * send held orders through payment_complete() and mark them paid without
+     * any collection. Held orders with a positive total must still route
+     * through the selected gateway.
+     *
+     * @param  bool  $needs_payment  Whether the order needs payment.
+     * @param  WC_Order  $order  Order.
+     * @return bool
+     */
+    public static function held_order_needs_payment($needs_payment, $order)
+    {
+        if ($needs_payment || !self::enabled() || !$order instanceof WC_Order) {
+            return $needs_payment;
+        }
+        if (!$order->has_status('on-hold') || (float) $order->get_total() <= 0) {
+            return $needs_payment;
+        }
+
+        return $order->get_meta('_adoology_risk_action', true) === 'hold';
     }
 
     /**

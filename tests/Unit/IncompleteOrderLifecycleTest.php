@@ -117,7 +117,8 @@ class IncompleteOrderLifecycleTest extends TestCase
             $product->shouldReceive('get_name')->andReturn($id === 31 ? 'Cotton Shirt - Blue' : 'Leather Wallet');
             $product->shouldReceive('get_price')->andReturn('12.50');
             $product->shouldReceive('get_parent_id')->andReturn(30);
-            $product->shouldReceive('is_purchasable', 'has_enough_stock')->andReturn(true);
+            $product->shouldReceive('get_type')->andReturn($id === 31 ? 'variation' : 'simple');
+            $product->shouldReceive('is_purchasable', 'has_enough_stock', 'is_in_stock')->andReturn(true);
             $product->shouldReceive('is_sold_individually')->andReturn(false);
 
             return $product;
@@ -1051,9 +1052,12 @@ class IncompleteOrderLifecycleTest extends TestCase
         $request = $this->capture_request($this->capture_context('order_form'));
         $first = IncompleteOrders::issue_capture_token($request)->get_data();
         $second = IncompleteOrders::issue_capture_token($request)->get_data();
+        // Landing-flow identities are deterministic per browser (stable
+        // across page regenerations) but stay distinct from the native
+        // checkout identity.
         foreach (array_keys($native) as $field) {
             $this->assertNotSame($native[$field], $first[$field]);
-            $this->assertNotSame($first[$field], $second[$field]);
+            $this->assertSame($first[$field], $second[$field]);
         }
         $this->assertSame($native, IncompleteOrders::identity());
         $this->assertSame(self::CHECKOUT, $_COOKIE[IncompleteOrders::COOKIE_CHECKOUT]);
@@ -1172,14 +1176,17 @@ class IncompleteOrderLifecycleTest extends TestCase
         when('sanitize_email')->returnArg();
         when('get_current_user_id')->justReturn(0);
         expect('wc_create_order')->once()->with(['customer_id' => 0])->andReturn($order);
-        when('wc_reserve_stock_for_order')->justReturn(null);
+        // WP-F23 regression: the native woocommerce_checkout_order_created hook owns
+        // reservation; an explicit wc_reserve_stock_for_order call double-reserves and
+        // rejects legitimate in-stock orders.
+        expect('wc_reserve_stock_for_order')->never();
         $delivery = base64_encode(wp_json_encode(['standard' => ['label' => 'Standard', 'cost' => 0]]));
         $_POST = [
             '_adoology_nonce' => 'valid', '_adoology_checkout_id' => $checkout_id,
             'product_id' => 30, 'quantity' => 2, 'adoology_name' => 'Ada Lovelace',
             'adoology_phone' => '+8801712345678', 'adoology_email' => 'ada@example.test',
             'adoology_address' => '1 Test Road', 'adoology_city' => 'Dhaka',
-            'delivery_config' => $delivery, 'delivery_signature' => hash_hmac('sha256', $delivery, 'lifecycle-test-secret'),
+            'delivery_config' => $delivery, 'delivery_signature' => hash_hmac('sha256', '30|' . $delivery, 'lifecycle-test-secret'),
             'delivery_option' => 'standard', 'payment_method' => 'cod',
         ];
         // Stop at the redirect instead of allowing submit() to exit PHPUnit.

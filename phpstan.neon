@@ -44,3 +44,10 @@ parameters:
         # Test fixtures keep option arrays as dynamic in-memory stores.
         - message: '#Call to function array_key_exists\(\) with mixed and array\{\} will always evaluate to false#'
           path: tests/Unit/OptionsTest.php
+        # Mockery 1.6 static mock() is typed as plain MockInterface, so
+        # WC_Order test doubles and dynamic wpdb property fixtures cannot be
+        # expressed as the stubbed class at the static-analysis level.
+        - identifier: argument.type
+          path: tests/Unit/FraudTest.php
+        - message: '#Access to an undefined property Mockery\\MockInterface::\$prefix#'
+          path: tests/Unit/ConnectionTest.php

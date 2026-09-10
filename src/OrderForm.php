@@ -108,7 +108,10 @@ class OrderForm
         }
         $delivery_json = wp_json_encode($delivery);
         $delivery_data = base64_encode((string) $delivery_json);
-        $delivery_signature = hash_hmac('sha256', $delivery_data, wp_salt('nonce'));
+        // Bind the signed delivery map to this product so a captured map
+        // cannot be replayed against a different product or form.
+        $delivery_signature = hash_hmac('sha256', (int) $product->get_id() . '|' . $delivery_data, wp_salt('nonce'));
+        $country = sanitize_key(WC()->countries->get_base_country());
 
         ob_start();
         self::styles();
@@ -138,6 +141,7 @@ class OrderForm
                 <?php self::variation_field($product); ?>
                 <p class="adoology-wide"><label><?php esc_html_e('Address', 'adoology-connector'); ?><input name="adoology_address" type="text" maxlength="500" autocomplete="street-address" required /></label></p>
                 <p><label><?php esc_html_e('City', 'adoology-connector'); ?><input name="adoology_city" type="text" maxlength="190" autocomplete="address-level2" required /></label></p>
+                <p><label><?php esc_html_e('Country', 'adoology-connector'); ?><input name="adoology_country" type="text" maxlength="2" value="<?php echo esc_attr($country); ?>" autocomplete="country" required /></label></p>
                 <p><label><?php esc_html_e('Postcode', 'adoology-connector'); ?><input name="adoology_postcode" type="text" maxlength="30" autocomplete="postal-code" /></label></p>
                 <p><label><?php esc_html_e('Delivery', 'adoology-connector'); ?><select name="delivery_option" required><?php foreach ($delivery as $value => $option) : ?><option value="<?php echo esc_attr($value); ?>"><?php echo esc_html($option['label'] . ($option['cost'] > 0 ? ' - ' . wp_strip_all_tags(wc_price($option['cost'])) : '')); ?></option><?php endforeach; ?></select></label></p>
                 <p><label><?php esc_html_e('Preferred payment', 'adoology-connector'); ?><select name="payment_method" required><?php foreach ($gateways as $gateway) : ?><option value="<?php echo esc_attr($gateway->id); ?>"><?php echo esc_html($gateway->get_title()); ?></option><?php endforeach; ?></select></label></p>
@@ -170,13 +174,35 @@ class OrderForm
             self::fail(__('Selected product is unavailable.', 'adoology-connector'), $referer);
         }
 
+        // A variable product never proceeds without an explicitly selected
+        // variation; the unmanaged parent path would bypass child stock and
+        // option validation.
+        if ($variation_id === 0 && $product->get_type() === 'variable') {
+            self::fail(__('Please choose a product option.', 'adoology-connector'), $referer);
+        }
+
+        // Explicit stock status check: reservation-disabled configurations
+        // skip the native gate that would otherwise reject out-of-stock items.
+        if (!$product->is_in_stock()) {
+            self::fail(__('Selected product is unavailable.', 'adoology-connector'), $referer);
+        }
+
+        // Honor the store checkout registration policy: when account creation
+        // is required at checkout, the landing form must not bypass it.
+        $registration_required = 'yes' === (string) get_option('woocommerce_enable_signup_and_login_from_checkout', 'yes')
+            && 'no' === (string) get_option('woocommerce_enable_guest_checkout', 'yes');
+        if ($registration_required && !get_current_user_id()) {
+            self::fail(__('Please sign in to place your order.', 'adoology-connector'), $referer);
+        }
+
         $name = sanitize_text_field(wp_unslash($_POST['adoology_name'] ?? ''));
         $phone = sanitize_text_field(wp_unslash($_POST['adoology_phone'] ?? ''));
         $email = sanitize_email(wp_unslash($_POST['adoology_email'] ?? ''));
         $address = sanitize_text_field(wp_unslash($_POST['adoology_address'] ?? ''));
         $city = sanitize_text_field(wp_unslash($_POST['adoology_city'] ?? ''));
         $postcode = sanitize_text_field(wp_unslash($_POST['adoology_postcode'] ?? ''));
-        $country = sanitize_key(WC()->countries->get_base_country());
+        $submitted_country = strtoupper(sanitize_key(wp_unslash($_POST['adoology_country'] ?? '')));
+        $country = preg_match('/^[A-Z]{2}$/', $submitted_country) === 1 ? $submitted_country : sanitize_key(WC()->countries->get_base_country());
         if ($name === '' || $phone === '' || $address === '' || $city === '') {
             self::fail(__('Name, phone, address, and city are required.', 'adoology-connector'), $referer);
         }
@@ -249,7 +275,7 @@ class OrderForm
         $delivery_signature = sanitize_text_field(wp_unslash($_POST['delivery_signature'] ?? ''));
         $delivery_options = json_decode((string) base64_decode($delivery_data, true), true);
         $delivery_option = sanitize_key(wp_unslash($_POST['delivery_option'] ?? ''));
-        if (!hash_equals(hash_hmac('sha256', $delivery_data, wp_salt('nonce')), $delivery_signature) || !is_array($delivery_options) || !isset($delivery_options[$delivery_option])) {
+        if (!hash_equals(hash_hmac('sha256', (int) $product_id . '|' . $delivery_data, wp_salt('nonce')), $delivery_signature) || !is_array($delivery_options) || !isset($delivery_options[$delivery_option])) {
             IncompleteOrders::release_submission($checkout_id);
             self::fail(__('Selected delivery option is unavailable.', 'adoology-connector'), $referer);
         }
@@ -290,9 +316,6 @@ class OrderForm
             $order->calculate_totals();
             $order->save();
             do_action('woocommerce_checkout_order_created', $order);
-            if (function_exists('wc_reserve_stock_for_order') && $order->needs_payment()) {
-                wc_reserve_stock_for_order($order);
-            }
             if (Fraud::enabled()) {
                 Fraud::enforce_order_assessment($order);
             }
@@ -315,7 +338,7 @@ class OrderForm
 
             return;
         }
-        IncompleteOrders::mark_complete($checkout_id, $order->get_id(), $order);
+        IncompleteOrders::mark_complete($checkout_id, $order->get_id(), $order, 0, $identity['anonymous_id']);
         wp_safe_redirect($redirect);
         exit;
     }
@@ -389,7 +412,10 @@ class OrderForm
     private static function fallback_checkout_id($nonce, $phone, $product_id)
     {
         $bucket = (int) floor(time() / (10 * MINUTE_IN_SECONDS));
-        $hash = hash_hmac('sha256', $nonce . '|' . $phone . '|' . (int) $product_id . '|' . IncompleteOrders::client_ip() . '|' . $bucket, wp_salt('nonce'));
+        // Deliberately excludes the per-render nonce: a regenerated page must
+        // resolve to the same fallback identity so repeat submissions dedupe
+        // against the accepted-order redirect instead of creating replacements.
+        $hash = hash_hmac('sha256', $phone . '|' . (int) $product_id . '|' . IncompleteOrders::client_ip() . '|' . $bucket, wp_salt('nonce'));
 
         return substr($hash, 0, 8) . '-' . substr($hash, 8, 4) . '-4' . substr($hash, 13, 3) . '-a' . substr($hash, 17, 3) . '-' . substr($hash, 20, 12);
     }
