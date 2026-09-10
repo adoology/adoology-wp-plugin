@@ -12,6 +12,7 @@ use Adoology\Options;
 use Adoology\Tests\TestCase;
 use Mockery;
 use ReflectionMethod;
+use stdClass;
 
 use function Brain\Monkey\Functions\when;
 
@@ -225,7 +226,7 @@ class ConnectionTest extends TestCase
     {
         global $wpdb;
 
-        $wpdb = Mockery::mock(\stdClass::class);
+        $wpdb = Mockery::mock(stdClass::class);
         $wpdb->prefix = 'wp_';
         $wpdb->shouldReceive('esc_like')->andReturnUsing(static fn ($value): string => addcslashes((string) $value, '_%\\'));
         $wpdb->shouldReceive('prepare')->andReturnUsing(static fn (string $sql): string => $sql);
