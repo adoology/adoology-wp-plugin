@@ -839,11 +839,28 @@ class IncompleteOrders
             }
         }
         $now = gmdate('Y-m-d H:i:s');
-        $wpdb->query($wpdb->prepare(
-            "UPDATE {$table} SET status = 'expired', updated_at = %s WHERE status IN ('started','incomplete') AND expires_at < %s",
-            $now,
-            $now
-        ));
+        for ($batch = 0; $batch < self::LIFECYCLE_MAX_BATCHES; $batch++) {
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT id, checkout_id, session_id, status, flow, product_id, variation_id, quantity, value_minor, currency, form_stage, customer_data FROM {$table} WHERE status IN ('started','incomplete') AND expires_at < %s LIMIT %d",
+                $now,
+                self::LIFECYCLE_BATCH_SIZE
+            ), ARRAY_A);
+            foreach ($rows as $row) {
+                $updated = $wpdb->update($table, ['status' => 'expired', 'updated_at' => $now], ['id' => (int) $row['id'], 'status' => $row['status']]);
+                if ($updated && Options::get('adoology_tracking_enabled', 'no') === 'yes') {
+                    Events::enqueue(
+                        'checkout.expired',
+                        self::anonymous_for_checkout($row['checkout_id']),
+                        $row['session_id'],
+                        self::incomplete_event_properties($row)
+                    );
+                }
+            }
+            $has_more = count($rows) === self::LIFECYCLE_BATCH_SIZE || $has_more;
+            if (count($rows) < self::LIFECYCLE_BATCH_SIZE) {
+                break;
+            }
+        }
         $has_more = self::purge_checkout_rows('expired', $now) || $has_more;
         $retention = min(90, max(1, (int) Options::get('adoology_incomplete_expire_days', 7))) * DAY_IN_SECONDS;
         $has_more = self::purge_checkout_rows('terminal', gmdate('Y-m-d H:i:s', time() - $retention)) || $has_more;
@@ -1335,6 +1352,10 @@ class IncompleteOrders
         if ($product_name !== '') {
             $properties['product_name'] = $product_name;
         }
+        $product_image = self::product_image($product_id, $variation_id);
+        if ($product_image !== '') {
+            $properties['product_image'] = $product_image;
+        }
         $items = self::event_items($customer['items'] ?? []);
         if ($items !== []) {
             $properties['items'] = $items;
@@ -1378,6 +1399,10 @@ class IncompleteOrders
             if ($product_name !== '') {
                 $item['product_name'] = $product_name;
             }
+            $product_image = self::product_image($item['product_id'], $item['variation_id']);
+            if ($product_image !== '') {
+                $item['product_image'] = $product_image;
+            }
             $result[] = $item;
         }
 
@@ -1400,6 +1425,29 @@ class IncompleteOrders
         $name = sanitize_text_field((string) $product->get_name());
 
         return function_exists('mb_substr') ? mb_substr($name, 0, 190) : substr($name, 0, 190);
+    }
+
+    /**
+     * Resolve a trusted WooCommerce product or variation thumbnail URL.
+     *
+     * @param  int  $product_id  Parent product ID.
+     * @param  int  $variation_id  Variation ID.
+     * @return string
+     */
+    private static function product_image($product_id, $variation_id)
+    {
+        $product = wc_get_product($variation_id ?: $product_id);
+        $image_id = $product ? (int) $product->get_image_id() : 0;
+        if ($image_id <= 0) {
+            $parent = wc_get_product($product_id);
+            $image_id = $parent ? (int) $parent->get_image_id() : 0;
+        }
+        if ($image_id <= 0 || !function_exists('wp_get_attachment_image_url')) {
+            return '';
+        }
+        $url = wp_get_attachment_image_url($image_id, 'woocommerce_thumbnail');
+
+        return is_string($url) ? esc_url_raw($url) : '';
     }
 
     /**
@@ -1568,6 +1616,10 @@ class IncompleteOrders
                 ? (string) ($event['properties']['checkout_id'] ?? '')
                 : '';
             if ($event_checkout_id === $checkout_id) {
+                // The terminal expiry event must reach the backend before retention cleanup.
+                if (is_array($event) && ($event['name'] ?? '') === 'checkout.expired') {
+                    continue;
+                }
                 $wpdb->delete($table, ['id' => (int) $row['id']], ['%d']);
             }
         }

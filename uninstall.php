@@ -102,6 +102,7 @@ function adoology_uninstall_site()
         'adoology_fraud_enabled',
         'adoology_fraud_rate_limit',
         'adoology_duplicate_window_minutes',
+        'adoology_duplicate_block_minutes',
         'adoology_fraud_flag_threshold',
         'adoology_fraud_hold_threshold',
         'adoology_fraud_block_threshold',

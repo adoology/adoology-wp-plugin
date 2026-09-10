@@ -26,6 +26,7 @@ class FraudTest extends TestCase
 
         when('sanitize_text_field')->returnArg();
         when('wp_unslash')->returnArg();
+        when('__')->returnArg();
         when('sanitize_email')->alias(fn ($email) => filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : '');
         when('wp_salt')->justReturn('test-salt');
         when('get_transient')->justReturn(0);
@@ -153,6 +154,117 @@ class FraudTest extends TestCase
 
         $this->assertSame(100, $result['score']);
         $this->assertSame('block', $result['action']);
+    }
+
+    /**
+     * @covers ::evaluate
+     */
+    public function test_hard_duplicate_block_rejects_recent_contact()
+    {
+        $captured = [];
+        when('wc_get_orders')->alias(function ($args) use (&$captured) {
+            $captured[] = $args;
+
+            return [123];
+        });
+
+        $result = Fraud::evaluate([
+            'billing_phone' => '+15551234567',
+            'billing_email' => 'valid@example.com',
+            'honeypot' => '',
+        ], [42], false);
+
+        $this->assertSame(100, $result['score']);
+        $this->assertSame('block', $result['action']);
+        $this->assertContains('duplicate_order_block', $result['signals']);
+        $this->assertSame(['pending', 'processing', 'on-hold', 'completed'], $captured[0]['status']);
+        $this->assertStringStartsWith('>', $captured[0]['date_created']);
+        $this->assertEqualsWithDelta(time() - 300, (int) substr($captured[0]['date_created'], 1), 5);
+    }
+
+    /**
+     * @covers ::evaluate
+     */
+    public function test_hard_duplicate_block_ignores_product_overlap()
+    {
+        when('wc_get_orders')->justReturn([123]);
+
+        $result = Fraud::evaluate([
+            'billing_phone' => '+15551234567',
+            'billing_email' => '',
+            'honeypot' => '',
+        ], [999], false);
+
+        $this->assertSame('block', $result['action']);
+        $this->assertContains('duplicate_order_block', $result['signals']);
+    }
+
+    /**
+     * @covers ::evaluate
+     */
+    public function test_hard_duplicate_block_allows_when_no_recent_order()
+    {
+        when('wc_get_orders')->justReturn([]);
+
+        $result = Fraud::evaluate([
+            'billing_phone' => '+15551234567',
+            'billing_email' => 'valid@example.com',
+            'honeypot' => '',
+        ], [42], false);
+
+        $this->assertSame(0, $result['score']);
+        $this->assertSame('allow', $result['action']);
+        $this->assertSame([], $result['signals']);
+    }
+
+    /**
+     * @covers ::evaluate
+     */
+    public function test_hard_duplicate_block_disabled_at_zero_minutes()
+    {
+        when('get_option')->alias(function ($name, $default = false) {
+            $values = [
+                'adoology_fraud_enabled' => 'yes',
+                'adoology_duplicate_block_minutes' => 0,
+            ];
+
+            return array_key_exists($name, $values) ? $values[$name] : $default;
+        });
+        $order = Mockery::mock('WC_Order');
+        $order->shouldReceive('get_id')->andReturn(123);
+        $order->shouldReceive('get_items')->andReturn([]);
+        when('wc_get_orders')->justReturn([$order]);
+
+        $result = Fraud::evaluate([
+            'billing_phone' => '+15551234567',
+            'billing_email' => 'valid@example.com',
+            'honeypot' => '',
+        ], [42], false);
+
+        $this->assertSame(0, $result['score']);
+        $this->assertSame('allow', $result['action']);
+        $this->assertNotContains('duplicate_order_block', $result['signals']);
+    }
+
+    /**
+     * @covers ::rejection_message
+     */
+    public function test_rejection_message_mentions_wait_for_duplicate_block()
+    {
+        $message = Fraud::rejection_message(['signals' => ['duplicate_order_block']]);
+
+        $this->assertStringContainsStringIgnoringCase('recently', $message);
+        $this->assertStringNotContainsStringIgnoringCase('contact the store', $message);
+    }
+
+    /**
+     * @covers ::rejection_message
+     */
+    public function test_rejection_message_is_generic_for_other_blocks()
+    {
+        $message = Fraud::rejection_message(['signals' => ['honeypot']]);
+
+        $this->assertStringContainsStringIgnoringCase('contact the store', $message);
     }
 
     /**

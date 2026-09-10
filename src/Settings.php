@@ -100,6 +100,7 @@ class Settings
             'adoology_incomplete_expire_days' => 'sanitize_expire_days',
             'adoology_fraud_rate_limit' => 'sanitize_fraud_rate_limit',
             'adoology_duplicate_window_minutes' => 'sanitize_duplicate_window_minutes',
+            'adoology_duplicate_block_minutes' => 'sanitize_duplicate_block_minutes',
             'adoology_fraud_flag_threshold' => 'sanitize_risk_threshold',
             'adoology_fraud_hold_threshold' => 'sanitize_risk_threshold',
             'adoology_fraud_block_threshold' => 'sanitize_risk_threshold',
@@ -211,6 +212,11 @@ class Settings
     public function sanitize_duplicate_window_minutes($value)
     {
         return min(1440, max(5, absint($value)));
+    }
+
+    public function sanitize_duplicate_block_minutes($value)
+    {
+        return min(1440, absint($value));
     }
 
     public function sanitize_risk_threshold($value)
@@ -561,7 +567,7 @@ class Settings
         ]);
         ?>
         <div class="wrap"><h1><?php esc_html_e('Fraud Protection', 'adoology-connector'); ?></h1>
-            <p><?php esc_html_e('Signals use direct IP velocity, duplicate contacts/products, invalid contact data, suspicious user agents, and a server-side honeypot.', 'adoology-connector'); ?></p>
+            <p><?php esc_html_e('Signals use direct IP velocity, duplicate contacts/products, invalid contact data, suspicious user agents, and a server-side honeypot. Orders from a contact that already ordered within the hard-block window are rejected outright.', 'adoology-connector'); ?></p>
             <p><strong><?php esc_html_e('Actions:', 'adoology-connector'); ?></strong> <?php printf(esc_html__('Flag at %1$d, hold at %2$d, block at %3$d.', 'adoology-connector'), $threshold, (int) Options::get('adoology_fraud_hold_threshold', 60), (int) Options::get('adoology_fraud_block_threshold', 90)); ?></p>
             <table class="widefat striped"><thead><tr><th><?php esc_html_e('Order', 'adoology-connector'); ?></th><th><?php esc_html_e('Score', 'adoology-connector'); ?></th><th><?php esc_html_e('Action', 'adoology-connector'); ?></th><th><?php esc_html_e('Signals', 'adoology-connector'); ?></th><th><?php esc_html_e('Status', 'adoology-connector'); ?></th></tr></thead><tbody>
             <?php if (!$orders) : ?><tr><td colspan="5"><?php esc_html_e('No flagged orders.', 'adoology-connector'); ?></td></tr><?php endif; ?>
@@ -604,6 +610,7 @@ class Settings
                     <?php $this->checkbox_row('adoology_fraud_enabled', __('Fraud and bot protection', 'adoology-connector')); ?>
                     <?php $this->number_row('adoology_fraud_rate_limit', __('Order attempts per 10 minutes', 'adoology-connector'), 2, 100); ?>
                     <?php $this->number_row('adoology_duplicate_window_minutes', __('Duplicate-order window (minutes)', 'adoology-connector'), 5, 1440); ?>
+                    <?php $this->number_row('adoology_duplicate_block_minutes', __('Duplicate-order hard block (minutes, 0 disables)', 'adoology-connector'), 0, 1440); ?>
                     <?php $this->number_row('adoology_fraud_flag_threshold', __('Flag threshold', 'adoology-connector'), 1, 100); ?>
                     <?php $this->number_row('adoology_fraud_hold_threshold', __('Hold threshold', 'adoology-connector'), 1, 100); ?>
                     <?php $this->number_row('adoology_fraud_block_threshold', __('Block threshold', 'adoology-connector'), 1, 100); ?>

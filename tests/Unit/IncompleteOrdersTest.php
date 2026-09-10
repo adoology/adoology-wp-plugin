@@ -22,7 +22,7 @@ class IncompleteOrdersTest extends TestCase
     /**
      * @covers ::incomplete_event_properties
      */
-    public function test_incomplete_event_contains_product_name()
+    public function test_incomplete_event_contains_product_name_and_thumbnail()
     {
         $product = new class
         {
@@ -30,8 +30,15 @@ class IncompleteOrdersTest extends TestCase
             {
                 return 'Premium Cotton Shirt';
             }
+
+            public function get_image_id()
+            {
+                return 55;
+            }
         };
         when('wc_get_product')->justReturn($product);
+        when('esc_url_raw')->returnArg();
+        when('wp_get_attachment_image_url')->alias(fn ($id) => 'https://woo.test/wp-content/uploads/img-' . $id . '-300x300.png');
 
         $method = new ReflectionMethod(IncompleteOrders::class, 'incomplete_event_properties');
         $method->setAccessible(true);
@@ -50,16 +57,19 @@ class IncompleteOrdersTest extends TestCase
         $this->assertSame(30, $properties['product_id']);
         $this->assertSame(31, $properties['variation_id']);
         $this->assertSame('Premium Cotton Shirt', $properties['product_name']);
+        $this->assertSame('https://woo.test/wp-content/uploads/img-55-300x300.png', $properties['product_image']);
     }
 
     /**
      * @covers ::incomplete_event_properties
      */
-    public function test_incomplete_event_contains_all_cart_items_with_product_names()
+    public function test_incomplete_event_contains_all_cart_items_with_product_names_and_thumbnails()
     {
         when('__')->returnArg();
         when('wp_salt')->justReturn('test-auth-secret');
         when('get_current_blog_id')->justReturn(1);
+        when('esc_url_raw')->returnArg();
+        when('wp_get_attachment_image_url')->alias(fn ($id) => 'https://woo.test/wp-content/uploads/img-' . $id . '-300x300.png');
         when('wc_get_product')->alias(function ($product_id) {
             $names = [30 => 'Premium Cotton Shirt', 41 => 'Leather Wallet'];
 
@@ -75,6 +85,11 @@ class IncompleteOrdersTest extends TestCase
                 public function get_name()
                 {
                     return $this->name;
+                }
+
+                public function get_image_id()
+                {
+                    return 66;
                 }
             } : false;
         });
@@ -105,12 +120,14 @@ class IncompleteOrdersTest extends TestCase
                 'variation_id' => 0,
                 'quantity' => 2,
                 'product_name' => 'Premium Cotton Shirt',
+                'product_image' => 'https://woo.test/wp-content/uploads/img-66-300x300.png',
             ],
             [
                 'product_id' => 40,
                 'variation_id' => 41,
                 'quantity' => 1,
                 'product_name' => 'Leather Wallet',
+                'product_image' => 'https://woo.test/wp-content/uploads/img-66-300x300.png',
             ],
         ], $properties['items']);
     }
@@ -327,7 +344,7 @@ class IncompleteOrdersTest extends TestCase
         when('WC')->justReturn((object) ['session' => null]);
         $_COOKIE[IncompleteOrders::COOKIE_ANON] = '82345678-1234-4234-8234-123456789abc';
         $_COOKIE[IncompleteOrders::COOKIE_CHECKOUT] = '92345678-1234-4234-8234-123456789abc';
-        $encryptedCustomer = \Adoology\Crypto::encrypt(wp_json_encode(['anonymous_id' => $anonymous_id]), 'adoology_checkout_' . $checkout_id);
+        $encryptedCustomer = Crypto::encrypt(wp_json_encode(['anonymous_id' => $anonymous_id]), 'adoology_checkout_' . $checkout_id);
 
         $makeWpdb = static fn (): object => new class($encryptedCustomer, $session_id)
         {
@@ -378,7 +395,6 @@ class IncompleteOrdersTest extends TestCase
         unset($GLOBALS['wpdb'], $_COOKIE[IncompleteOrders::COOKIE_ANON], $_COOKIE[IncompleteOrders::COOKIE_CHECKOUT]);
     }
 
-
     public function test_client_identifier_prefers_customer_then_ip_over_cookies()
     {
         when('wp_salt')->justReturn('test-nonce-secret');
@@ -408,4 +424,3 @@ class IncompleteOrdersTest extends TestCase
         unset($_SERVER['REMOTE_ADDR'], $_COOKIE[IncompleteOrders::COOKIE_ANON]);
     }
 }
-

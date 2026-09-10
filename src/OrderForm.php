@@ -189,8 +189,8 @@ class OrderForm
 
         // Honor the store checkout registration policy: when account creation
         // is required at checkout, the landing form must not bypass it.
-        $registration_required = 'yes' === (string) get_option('woocommerce_enable_signup_and_login_from_checkout', 'yes')
-            && 'no' === (string) get_option('woocommerce_enable_guest_checkout', 'yes');
+        $registration_required = (string) get_option('woocommerce_enable_signup_and_login_from_checkout', 'yes') === 'yes'
+            && (string) get_option('woocommerce_enable_guest_checkout', 'yes') === 'no';
         if ($registration_required && !get_current_user_id()) {
             self::fail(__('Please sign in to place your order.', 'adoology-connector'), $referer);
         }
@@ -239,7 +239,7 @@ class OrderForm
                 'risk_score' => $risk['score'],
                 'signals' => $risk['signals'],
             ], IncompleteOrders::request_context());
-            self::fail(__('We could not accept this order. Please contact the store for assistance.', 'adoology-connector'), $referer);
+            self::fail(Fraud::rejection_message($risk), $referer);
         }
 
         $snapshot = IncompleteOrders::store_snapshot($checkout_id, [
