@@ -32,7 +32,7 @@ class DatabaseTest extends TestCase
             static fn (string $sql, string $table): string => str_replace('%s', "'{$table}'", $sql)
         );
         $wpdb->shouldReceive('get_var')->andReturnUsing(
-            static fn (string $query): ?string => str_contains($query, 'wp_adoology_events') ? 'wp_adoology_events' : 'wp_adoology_incomplete'
+            static fn (string $query): string => str_contains($query, 'wp_adoology_events') ? 'wp_adoology_events' : 'wp_adoology_incomplete'
         );
 
         $this->assertTrue($this->tables_exist($wpdb, ['wp_adoology_events', 'wp_adoology_incomplete']));

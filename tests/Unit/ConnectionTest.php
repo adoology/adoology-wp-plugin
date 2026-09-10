@@ -225,7 +225,7 @@ class ConnectionTest extends TestCase
     {
         global $wpdb;
 
-        $wpdb = Mockery::mock();
+        $wpdb = Mockery::mock(\stdClass::class);
         $wpdb->prefix = 'wp_';
         $wpdb->shouldReceive('esc_like')->andReturnUsing(static fn ($value): string => addcslashes((string) $value, '_%\\'));
         $wpdb->shouldReceive('prepare')->andReturnUsing(static fn (string $sql): string => $sql);
