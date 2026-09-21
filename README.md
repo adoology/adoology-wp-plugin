@@ -2,7 +2,7 @@
 
 Adoology for WooCommerce connects a WooCommerce store to an Adoology workspace for catalog, customer, order, and inventory synchronization. It also provides durable storefront event delivery, configurable incomplete-order tracking, local fraud protection, and a cart-independent landing-page order form.
 
-Current plugin version: `0.1.5`
+Current plugin version: `0.1.6`
 
 ## Contents
 

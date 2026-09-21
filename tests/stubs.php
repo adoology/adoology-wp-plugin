@@ -20,7 +20,7 @@ if (!defined('YEAR_IN_SECONDS')) {
 }
 
 if (!defined('ADOOLOGY_VERSION')) {
-    define('ADOOLOGY_VERSION', '0.1.5');
+    define('ADOOLOGY_VERSION', '0.1.6');
 }
 if (!defined('ADOOLOGY_PLUGIN_FILE')) {
     define('ADOOLOGY_PLUGIN_FILE', '/tmp/adoology-connector.php');
