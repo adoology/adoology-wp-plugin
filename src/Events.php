@@ -142,11 +142,11 @@ class Events
 
         $lease_token = wp_generate_uuid4();
         $placeholders = implode(',', array_fill(0, count($candidate_ids), '%d'));
-        $claim_query = $wpdb->prepare(
+        $wpdb->query($wpdb->prepare(
+            // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- dynamic IN() placeholders supplied via array_merge below.
             "UPDATE {$table} SET status = 'processing', lease_token = %s, lease_expires_at = %s, updated_at = %s WHERE id IN ({$placeholders}) AND status IN ('pending','retrying') AND available_at <= %s",
             array_merge([$lease_token, gmdate('Y-m-d H:i:s', time() + 5 * MINUTE_IN_SECONDS), $now], array_map('intval', $candidate_ids), [$now])
-        );
-        $wpdb->query($claim_query);
+        ));
         $rows = $wpdb->get_results($wpdb->prepare(
             "SELECT id, event_id, payload, attempts FROM {$table} WHERE lease_token = %s AND status = 'processing' ORDER BY id ASC",
             $lease_token
@@ -187,11 +187,11 @@ class Events
             }
 
             $sent_placeholders = implode(',', array_fill(0, count($ids), '%d'));
-            $query = $wpdb->prepare(
+            $wpdb->query($wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- dynamic IN() placeholders supplied via array_merge below.
                 "UPDATE {$table} SET status = 'sent', sent_at = %s, updated_at = %s, last_error = NULL, lease_token = NULL, lease_expires_at = NULL WHERE id IN ({$sent_placeholders}) AND status = 'processing' AND lease_token = %s",
                 array_merge([$now, $now], $ids, [$lease_token])
-            );
-            $wpdb->query($query);
+            ));
         }
 
         self::schedule_processing(time() + 1, true, $continuation_token);

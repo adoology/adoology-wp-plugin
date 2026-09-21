@@ -3,6 +3,7 @@ Contributors: adoology
 Tags: woocommerce, orders, ecommerce, fraud, automation
 Requires at least: 6.0
 Requires PHP: 7.4
+Tested up to: 6.8
 Stable tag: 0.1.6
 License: GPLv2 or later
 

@@ -357,7 +357,11 @@ class IncompleteOrders
             $wpdb->query('START TRANSACTION');
             try {
                 $result = self::store_snapshot_locked($checkout_id, $data);
-                $wpdb->query(is_wp_error($result) ? 'ROLLBACK' : 'COMMIT');
+                if (is_wp_error($result)) {
+                    $wpdb->query('ROLLBACK');
+                } else {
+                    $wpdb->query('COMMIT');
+                }
 
                 return $result;
             } catch (Throwable $error) {
@@ -624,7 +628,8 @@ class IncompleteOrders
         $shipping = (array) $request->get_param('shipping_address');
         $contact = [];
         $fields = ['name' => ['first_name', 'last_name'], 'phone' => ['phone'], 'email' => ['email'], 'address' => ['address_1', 'address_2'], 'city' => ['city'], 'postcode' => ['postcode'], 'country' => ['country']];
-        $stored = $wpdb->get_var($wpdb->prepare('SELECT customer_data FROM ' . Database::incomplete_table() . ' WHERE checkout_id = %s', $identity['checkout_id']));
+        $incomplete_table = Database::incomplete_table();
+        $stored = $wpdb->get_var($wpdb->prepare("SELECT customer_data FROM {$incomplete_table} WHERE checkout_id = %s", $identity['checkout_id']));
         $previous = self::customer_payload((string) $stored, $identity['checkout_id']);
         $billing_contact = !empty($previous['_billing_contact']) || $billing_name !== '' || $customer->get_billing_phone() !== '' || $billing_address !== '';
         $default_billing = !$billing_contact;
@@ -1047,8 +1052,9 @@ class IncompleteOrders
         if (!self::is_uuid($checkout_id)) {
             return self::identity();
         }
+        $incomplete_table = Database::incomplete_table();
         $row = $wpdb->get_row($wpdb->prepare(
-            'SELECT session_id, customer_data FROM ' . Database::incomplete_table() . ' WHERE checkout_id = %s',
+            "SELECT session_id, customer_data FROM {$incomplete_table} WHERE checkout_id = %s",
             $checkout_id
         ), ARRAY_A);
         $customer = is_array($row) ? self::customer_payload((string) $row['customer_data'], $checkout_id) : [];
@@ -1314,7 +1320,8 @@ class IncompleteOrders
     private static function anonymous_for_checkout($checkout_id)
     {
         global $wpdb;
-        $payload = $wpdb->get_var($wpdb->prepare('SELECT customer_data FROM ' . Database::incomplete_table() . ' WHERE checkout_id = %s', $checkout_id));
+        $incomplete_table = Database::incomplete_table();
+        $payload = $wpdb->get_var($wpdb->prepare("SELECT customer_data FROM {$incomplete_table} WHERE checkout_id = %s", $checkout_id));
         if ($payload) {
             $decrypted = Crypto::decrypt($payload, 'adoology_checkout_' . $checkout_id);
             $data = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
@@ -1671,20 +1678,21 @@ class IncompleteOrders
     {
         global $wpdb;
 
+        $incomplete_table = Database::incomplete_table();
         if ($limit > 0 && $after_id > 0) {
             $rows = $wpdb->get_results($wpdb->prepare(
-                'SELECT * FROM ' . Database::incomplete_table() . " WHERE customer_data <> '' AND id > %d ORDER BY id ASC LIMIT %d",
+                "SELECT * FROM {$incomplete_table} WHERE customer_data <> '' AND id > %d ORDER BY id ASC LIMIT %d",
                 $after_id,
                 $limit
             ), ARRAY_A);
         } elseif ($limit > 0) {
             $rows = $wpdb->get_results($wpdb->prepare(
-                'SELECT * FROM ' . Database::incomplete_table() . " WHERE customer_data <> '' ORDER BY id ASC LIMIT %d OFFSET %d",
+                "SELECT * FROM {$incomplete_table} WHERE customer_data <> '' ORDER BY id ASC LIMIT %d OFFSET %d",
                 $limit,
                 max(0, ((int) $page - 1) * $limit)
             ), ARRAY_A);
         } else {
-            $rows = $wpdb->get_results('SELECT * FROM ' . Database::incomplete_table() . " WHERE customer_data <> '' ORDER BY id ASC", ARRAY_A);
+            $rows = $wpdb->get_results("SELECT * FROM {$incomplete_table} WHERE customer_data <> '' ORDER BY id ASC", ARRAY_A);
         }
         $matches = [];
         foreach ($rows as $row) {
@@ -1711,8 +1719,9 @@ class IncompleteOrders
         if ($anonymous_id === '') {
             return [];
         }
+        $events_table = Database::events_table();
         $rows = $wpdb->get_results($wpdb->prepare(
-            'SELECT event_id, payload FROM ' . Database::events_table() . ' WHERE anonymous_id = %s ORDER BY id ASC',
+            "SELECT event_id, payload FROM {$events_table} WHERE anonymous_id = %s ORDER BY id ASC",
             $anonymous_id
         ), ARRAY_A);
         $events = [];
@@ -1734,7 +1743,7 @@ class IncompleteOrders
 
     private static function current_url()
     {
-        $path = isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '/';
+        $path = isset($_SERVER['REQUEST_URI']) ? esc_url_raw(wp_unslash($_SERVER['REQUEST_URI'])) : '/';
 
         return home_url($path);
     }

@@ -538,7 +538,8 @@ class Webhooks
     {
         $key = 'HTTP_' . strtoupper(str_replace('-', '_', $name));
 
-        return isset($_SERVER[$key]) && is_scalar($_SERVER[$key]) ? trim((string) wp_unslash($_SERVER[$key])) : '';
+        // Header values are opaque ASCII tokens; sanitize for storage while preserving separators.
+        return isset($_SERVER[$key]) && is_scalar($_SERVER[$key]) ? sanitize_text_field(trim((string) wp_unslash($_SERVER[$key]))) : '';
     }
 
     /**

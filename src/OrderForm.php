@@ -212,11 +212,11 @@ class OrderForm
             $checkout_id = self::fallback_checkout_id($nonce, $phone, $product_id);
         }
         $identity = IncompleteOrders::identity_for_checkout($checkout_id, [
-            'anonymous_id' => wp_unslash($_POST['_adoology_anonymous_id'] ?? ''),
-            'session_id' => wp_unslash($_POST['_adoology_session_id'] ?? ''),
-            'capture_token' => wp_unslash($_POST['_adoology_capture_token'] ?? ''),
-            'capture_context' => wp_unslash($_POST['_adoology_capture_context'] ?? ''),
-            'capture_signature' => wp_unslash($_POST['_adoology_capture_signature'] ?? ''),
+            'anonymous_id' => sanitize_text_field(wp_unslash($_POST['_adoology_anonymous_id'] ?? '')),
+            'session_id' => sanitize_text_field(wp_unslash($_POST['_adoology_session_id'] ?? '')),
+            'capture_token' => sanitize_text_field(wp_unslash($_POST['_adoology_capture_token'] ?? '')),
+            'capture_context' => sanitize_text_field(wp_unslash($_POST['_adoology_capture_context'] ?? '')),
+            'capture_signature' => sanitize_text_field(wp_unslash($_POST['_adoology_capture_signature'] ?? '')),
         ], $product_id);
 
         $accepted_order_id = IncompleteOrders::accepted_order_id($checkout_id);

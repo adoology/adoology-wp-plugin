@@ -278,7 +278,8 @@ class Settings
         global $wpdb;
 
         $this->authorize_action('adoology_retry_events');
-        $wpdb->query('UPDATE ' . Database::events_table() . " SET status = 'pending', attempts = 0, available_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE status IN ('failed','retrying')");
+        $events_table = Database::events_table();
+        $wpdb->query("UPDATE {$events_table} SET status = 'pending', attempts = 0, available_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE status IN ('failed','retrying')");
         Events::schedule_processing();
         $this->redirect_with_result('adoology_retry', true);
     }
@@ -399,8 +400,10 @@ class Settings
         $this->guard_page();
         $state = Options::get('adoology_connection_state', []);
         $state = is_array($state) ? $state : [];
-        $events = $wpdb->get_results('SELECT status, COUNT(*) AS total FROM ' . Database::events_table() . ' GROUP BY status', OBJECT_K);
-        $incomplete = $wpdb->get_results('SELECT status, COUNT(*) AS total FROM ' . Database::incomplete_table() . ' GROUP BY status', OBJECT_K);
+        $events_table = Database::events_table();
+        $incomplete_table = Database::incomplete_table();
+        $events = $wpdb->get_results("SELECT status, COUNT(*) AS total FROM {$events_table} GROUP BY status", OBJECT_K);
+        $incomplete = $wpdb->get_results("SELECT status, COUNT(*) AS total FROM {$incomplete_table} GROUP BY status", OBJECT_K);
         $risk_orders = wc_get_orders([
             'limit' => 1,
             'paginate' => true,
@@ -416,6 +419,7 @@ class Settings
         $last_sync_display = $last_sync_timestamp === false
             ? __('Not available', 'adoology-connector')
             : sprintf(
+                /* translators: 1: date, 2: time. */
                 __('%1$s at %2$s', 'adoology-connector'),
                 wp_date(get_option('date_format'), $last_sync_timestamp),
                 wp_date(get_option('time_format'), $last_sync_timestamp)
@@ -488,7 +492,8 @@ class Settings
             return;
         }
 
-        $rows = $wpdb->get_results('SELECT * FROM ' . Database::incomplete_table() . ' ORDER BY updated_at DESC LIMIT 100', ARRAY_A);
+        $incomplete_table = Database::incomplete_table();
+        $rows = $wpdb->get_results("SELECT * FROM {$incomplete_table} ORDER BY updated_at DESC LIMIT 100", ARRAY_A);
         ?>
         <div class="wrap"><h1><?php esc_html_e('Incomplete Orders', 'adoology-connector'); ?></h1>
             <p><?php esc_html_e('Checkout and landing-page starts are marked incomplete after the configured inactivity window. Records are read-only here; contact, recovery, and order creation are managed in Adoology.', 'adoology-connector'); ?></p>
@@ -511,7 +516,8 @@ class Settings
     {
         global $wpdb;
 
-        $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . Database::incomplete_table() . ' WHERE id = %d', $id), ARRAY_A);
+        $incomplete_table = Database::incomplete_table();
+        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$incomplete_table} WHERE id = %d", $id), ARRAY_A);
         if (!$row) {
             echo '<div class="wrap"><h1>' . esc_html__('Incomplete Orders', 'adoology-connector') . '</h1><div class="notice notice-error inline"><p>' . esc_html__('Record not found.', 'adoology-connector') . '</p></div><p><a class="button" href="' . esc_url(admin_url('admin.php?page=adoology-incomplete')) . '">' . esc_html__('Back to list', 'adoology-connector') . '</a></p></div>';
 
@@ -541,7 +547,7 @@ class Settings
             <p><?php esc_html_e('Read-only snapshot. Contact, recovery, and order creation are managed in Adoology.', 'adoology-connector'); ?></p>
             <table class="form-table" role="presentation">
                 <?php foreach ($fields as $label => $value) : ?>
-                    <tr><th scope="row"><?php echo esc_html($label); ?></th><td><?php echo $value; ?></td></tr>
+                    <tr><th scope="row"><?php echo esc_html($label); ?></th><td><?php echo $value; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- each field value is escaped above.?></td></tr>
                 <?php endforeach; ?>
                 <?php if ((int) $row['order_id'] > 0) : ?>
                     <tr><th scope="row"><?php esc_html_e('Order', 'adoology-connector'); ?></th><td><a href="<?php echo esc_url($this->order_edit_url($row['order_id'])); ?>">#<?php echo esc_html((string) $row['order_id']); ?></a></td></tr>
@@ -568,7 +574,13 @@ class Settings
         ?>
         <div class="wrap"><h1><?php esc_html_e('Fraud Protection', 'adoology-connector'); ?></h1>
             <p><?php esc_html_e('Signals use direct IP velocity, duplicate contacts/products, invalid contact data, suspicious user agents, and a server-side honeypot. Orders from a contact that already ordered within the hard-block window are rejected outright.', 'adoology-connector'); ?></p>
-            <p><strong><?php esc_html_e('Actions:', 'adoology-connector'); ?></strong> <?php printf(esc_html__('Flag at %1$d, hold at %2$d, block at %3$d.', 'adoology-connector'), $threshold, (int) Options::get('adoology_fraud_hold_threshold', 60), (int) Options::get('adoology_fraud_block_threshold', 90)); ?></p>
+            <p><strong><?php esc_html_e('Actions:', 'adoology-connector'); ?></strong> <?php printf(
+                /* translators: 1: flag threshold, 2: hold threshold, 3: block threshold. */
+                esc_html__('Flag at %1$d, hold at %2$d, block at %3$d.', 'adoology-connector'),
+                absint($threshold),
+                absint((int) Options::get('adoology_fraud_hold_threshold', 60)),
+                absint((int) Options::get('adoology_fraud_block_threshold', 90))
+            ); ?></p>
             <table class="widefat striped"><thead><tr><th><?php esc_html_e('Order', 'adoology-connector'); ?></th><th><?php esc_html_e('Score', 'adoology-connector'); ?></th><th><?php esc_html_e('Action', 'adoology-connector'); ?></th><th><?php esc_html_e('Signals', 'adoology-connector'); ?></th><th><?php esc_html_e('Status', 'adoology-connector'); ?></th></tr></thead><tbody>
             <?php if (!$orders) : ?><tr><td colspan="5"><?php esc_html_e('No flagged orders.', 'adoology-connector'); ?></td></tr><?php endif; ?>
             <?php foreach ($orders as $order) : ?><tr><td><a href="<?php echo esc_url($this->order_edit_url($order->get_id())); ?>">#<?php echo esc_html((string) $order->get_id()); ?></a></td><td><?php echo esc_html((string) $order->get_meta('_adoology_risk_score', true)); ?>/100</td><td><?php echo esc_html((string) $order->get_meta('_adoology_risk_action', true)); ?></td><td><?php echo esc_html(implode(', ', (array) json_decode((string) $order->get_meta('_adoology_risk_signals', true), true))); ?></td><td><?php echo esc_html(wc_get_order_status_name($order->get_status())); ?></td></tr><?php endforeach; ?>
@@ -629,7 +641,8 @@ class Settings
         global $wpdb;
 
         $this->guard_page();
-        $rows = $wpdb->get_results('SELECT event_id, event_name, status, attempts, last_error, created_at, sent_at FROM ' . Database::events_table() . ' ORDER BY id DESC LIMIT 100', ARRAY_A);
+        $events_table = Database::events_table();
+        $rows = $wpdb->get_results("SELECT event_id, event_name, status, attempts, last_error, created_at, sent_at FROM {$events_table} ORDER BY id DESC LIMIT 100", ARRAY_A);
         ?>
         <div class="wrap"><h1><?php esc_html_e('Adoology Logs', 'adoology-connector'); ?></h1><?php $this->render_action_notice(); ?>
             <?php $this->admin_styles(); ?>

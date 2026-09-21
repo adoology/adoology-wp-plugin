@@ -148,9 +148,9 @@ function adoology_uninstall_site()
 }
 
 if (is_multisite()) {
-    $site_ids = get_sites(['fields' => 'ids', 'number' => 0]);
-    foreach ($site_ids as $site_id) {
-        switch_to_blog((int) $site_id);
+    $adoology_site_ids = get_sites(['fields' => 'ids', 'number' => 0]);
+    foreach ($adoology_site_ids as $adoology_site_id) {
+        switch_to_blog((int) $adoology_site_id);
         adoology_uninstall_site();
         restore_current_blog();
     }

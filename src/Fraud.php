@@ -118,7 +118,7 @@ class Fraud
         if ($assessment['action'] === 'block' && class_exists('Automattic\\WooCommerce\\StoreApi\\Exceptions\\RouteException')) {
             throw new RouteException(
                 'adoology_risk_blocked',
-                self::rejection_message($assessment),
+                esc_html(self::rejection_message($assessment)),
                 403
             );
         }
@@ -152,7 +152,7 @@ class Fraud
         $raw_phone = sanitize_text_field((string) ($data['billing_phone'] ?? $data['phone'] ?? ''));
         $phone = self::normalize_phone($raw_phone);
         $email = sanitize_email((string) ($data['billing_email'] ?? $data['email'] ?? ''));
-        $agent = strtolower((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''));
+        $agent = strtolower(sanitize_text_field(wp_unslash((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''))));
 
         if (!empty($data['honeypot'])) {
             $score += 100;
