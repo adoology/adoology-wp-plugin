@@ -276,26 +276,6 @@ class ApiClient
     }
 
     /**
-     * Delete a channel connection.
-     *
-     * @param  string  $connection_id  Connection ID.
-     * @param  string  $idempotency_key  Stable key.
-     * @param  bool  $single_attempt  Use one bounded attempt for teardown.
-     * @return array|WP_Error
-     */
-    public static function delete_connection($connection_id, $idempotency_key, $single_attempt = false)
-    {
-        return self::request(
-            'DELETE',
-            '/channel-connections/' . rawurlencode((string) $connection_id),
-            null,
-            $idempotency_key,
-            $single_attempt ? 1 : self::MAX_ATTEMPTS,
-            $single_attempt ? 5 : 20
-        );
-    }
-
-    /**
      * Ingest generic storefront events.
      *
      * @param  array  $events  Event batch.

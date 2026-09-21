@@ -166,24 +166,14 @@ class Connection
 
         if (!preg_match('/^[a-f0-9]{64}$/Di', $webhook_secret) || !self::is_safe_authorization_url($redirect_url, $connection_id, $webhook_secret)) {
             if (!$existing) {
-                $deleted = ApiClient::delete_connection($connection_id, ApiClient::new_idempotency_key());
-                if (is_wp_error($deleted)) {
-                    Options::update('adoology_connection_id', $connection_id);
-                    self::store_backend_state($created, 'authorization_error');
-                } else {
-                    Options::delete('adoology_create_idempotency_key');
-                }
+                Options::delete('adoology_create_idempotency_key');
             }
 
             return self::fail(new WP_Error('adoology_bad_authorization_url', __('Adoology returned an invalid WooCommerce authorization URL.', 'adoology-connector')));
         }
 
         $stored_secret = Crypto::set_secret('adoology_webhook_secret', $webhook_secret);
-        if (is_wp_error($stored_secret)) {
-            ApiClient::delete_connection($connection_id, ApiClient::new_idempotency_key());
 
-            return self::fail($stored_secret);
-        }
         Options::update('adoology_connection_id', $connection_id);
         self::store_backend_state($created, 'connecting');
         Options::delete('adoology_create_idempotency_key');
@@ -254,13 +244,6 @@ class Connection
             if ($key === '') {
                 $key = ApiClient::new_idempotency_key();
                 Options::update('adoology_disconnect_idempotency_key', $key);
-            }
-
-            $result = ApiClient::delete_connection($connection_id, $key);
-            if (is_wp_error($result) && ApiClient::error_status($result) !== 404) {
-                self::delete_managed_woocommerce_credentials();
-
-                return self::fail($result);
             }
         }
 
@@ -458,17 +441,21 @@ class Connection
 
         parse_str((string) $actual['query'], $query);
         $expected_state = $connection_id . '.' . hash_hmac('sha256', $connection_id, $webhook_secret);
-        if (!isset($query['scope'], $query['user_id'], $query['callback_url']) ||
+        if (
+            !isset($query['scope'], $query['user_id'], $query['callback_url']) ||
             !is_string($query['scope']) || !hash_equals('read_write', $query['scope']) ||
             !is_string($query['user_id']) || !hash_equals($expected_state, $query['user_id']) ||
-            !is_string($query['callback_url'])) {
+            !is_string($query['callback_url'])
+        ) {
             return false;
         }
 
         $callback = wp_parse_url($query['callback_url']);
         $api_base = wp_parse_url(ApiClient::base_url());
-        if (!is_array($callback) || !is_array($api_base) || ($callback['path'] ?? '') !== '/woocommerce/callback' ||
-            isset($callback['user']) || isset($callback['pass']) || isset($callback['fragment'])) {
+        if (
+            !is_array($callback) || !is_array($api_base) || ($callback['path'] ?? '') !== '/woocommerce/callback' ||
+            isset($callback['user']) || isset($callback['pass']) || isset($callback['fragment'])
+        ) {
             return false;
         }
 

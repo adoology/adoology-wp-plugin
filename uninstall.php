@@ -24,14 +24,6 @@ function adoology_uninstall_site()
 
     $connection_id = (string) get_option('adoology_connection_id', '');
     $preserve_remote_state = $connection_id !== '' && !class_exists(ApiClient::class);
-    if (class_exists(ApiClient::class) && preg_match('/^[0-9A-HJKMNP-TV-Z]{26}$/Di', $connection_id)) {
-        $remote_result = ApiClient::delete_connection(
-            $connection_id,
-            ApiClient::new_idempotency_key(),
-            true
-        );
-        $preserve_remote_state = is_wp_error($remote_result) && ApiClient::error_status($remote_result) !== 404;
-    }
 
     if (class_exists(Connection::class)) {
         Connection::delete_managed_woocommerce_credentials();
@@ -44,12 +36,24 @@ function adoology_uninstall_site()
             $wpdb->esc_like('Adoology: ') . '%'
         ), ARRAY_A);
         $webhook_names = [
-            'Adoology customer.created', 'Adoology customer.deleted', 'Adoology customer.updated',
-            'Adoology order.created', 'Adoology order.deleted', 'Adoology order.updated',
-            'Adoology product.created', 'Adoology product.deleted', 'Adoology product.updated',
-            'Adoology: customer.created', 'Adoology: customer.deleted', 'Adoology: customer.updated',
-            'Adoology: order.created', 'Adoology: order.deleted', 'Adoology: order.updated',
-            'Adoology: product.created', 'Adoology: product.deleted', 'Adoology: product.updated',
+            'Adoology customer.created',
+            'Adoology customer.deleted',
+            'Adoology customer.updated',
+            'Adoology order.created',
+            'Adoology order.deleted',
+            'Adoology order.updated',
+            'Adoology product.created',
+            'Adoology product.deleted',
+            'Adoology product.updated',
+            'Adoology: customer.created',
+            'Adoology: customer.deleted',
+            'Adoology: customer.updated',
+            'Adoology: order.created',
+            'Adoology: order.deleted',
+            'Adoology: order.updated',
+            'Adoology: product.created',
+            'Adoology: product.deleted',
+            'Adoology: product.updated',
         ];
         foreach ($webhooks as $webhook) {
             if (in_array((string) $webhook['name'], $webhook_names, true)) {

@@ -636,7 +636,7 @@ Deactivation stops plugin cron hooks. It does not disconnect the store, delete d
 
 ### Uninstall
 
-Uninstall attempts a bounded remote disconnect, synchronously removes locally identifiable Adoology webhooks/API keys, clears both WP-Cron and Action Scheduler work, removes plugin options, and drops both plugin tables.
+Uninstall attempts a bounded remote disconnect, synchronously removes locally identifiable Adoology webhooks/API keys, clears both WP-Cron and Action Scheduler work, removes plugin options, and drops the incomplete-orders table. The events table (API call log) is preserved so delivery history survives uninstall.
 
 If the backend cannot be reached, API URL, workspace key, connection ID, and disconnect idempotency state are preserved for possible recovery after reinstall. Local WooCommerce credentials are still revoked.
 
