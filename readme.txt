@@ -4,7 +4,7 @@ Tags: woocommerce, orders, ecommerce, fraud, automation
 Requires at least: 6.0
 Requires PHP: 7.4
 Tested up to: 6.8
-Stable tag: 0.1.6
+Stable tag: 0.1.7
 License: GPLv2 or later
 
 == Description ==
