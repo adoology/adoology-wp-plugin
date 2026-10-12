@@ -43,13 +43,13 @@ class Crypto
     public static function encrypt($plaintext, $context)
     {
         if (!self::is_available()) {
-            return new WP_Error('adoology_crypto_unavailable', __('OpenSSL AES-256-GCM support is required to store Adoology credentials.', 'adoology-connector'));
+            return new WP_Error('adoology_crypto_unavailable', __('OpenSSL AES-256-GCM support is required to store Adoology credentials.', 'adoology-for-woocommerce'));
         }
 
         try {
             $iv = random_bytes(12);
         } catch (Exception $exception) {
-            return new WP_Error('adoology_random_failed', __('Secure random generation failed.', 'adoology-connector'));
+            return new WP_Error('adoology_random_failed', __('Secure random generation failed.', 'adoology-for-woocommerce'));
         }
 
         $tag = '';
@@ -65,7 +65,7 @@ class Crypto
         );
 
         if ($ciphertext === false || strlen($tag) !== 16) {
-            return new WP_Error('adoology_encrypt_failed', __('Credential encryption failed.', 'adoology-connector'));
+            return new WP_Error('adoology_encrypt_failed', __('Credential encryption failed.', 'adoology-for-woocommerce'));
         }
 
         $payload = wp_json_encode([
@@ -75,7 +75,7 @@ class Crypto
         ]);
 
         if (!is_string($payload)) {
-            return new WP_Error('adoology_encrypt_failed', __('Credential encryption failed.', 'adoology-connector'));
+            return new WP_Error('adoology_encrypt_failed', __('Credential encryption failed.', 'adoology-for-woocommerce'));
         }
 
         return self::PREFIX . base64_encode($payload);
@@ -91,18 +91,18 @@ class Crypto
     public static function decrypt($encoded, $context)
     {
         if (!self::is_available()) {
-            return new WP_Error('adoology_crypto_unavailable', __('OpenSSL AES-256-GCM support is required to read Adoology credentials.', 'adoology-connector'));
+            return new WP_Error('adoology_crypto_unavailable', __('OpenSSL AES-256-GCM support is required to read Adoology credentials.', 'adoology-for-woocommerce'));
         }
 
         if (strpos((string) $encoded, self::PREFIX) !== 0) {
-            return new WP_Error('adoology_ciphertext_invalid', __('Stored Adoology credential is not encrypted.', 'adoology-connector'));
+            return new WP_Error('adoology_ciphertext_invalid', __('Stored Adoology credential is not encrypted.', 'adoology-for-woocommerce'));
         }
 
         $json = base64_decode(substr((string) $encoded, strlen(self::PREFIX)), true);
         $data = is_string($json) ? json_decode($json, true) : null;
 
         if (!is_array($data) || !isset($data['iv'], $data['tag'], $data['ct'])) {
-            return new WP_Error('adoology_ciphertext_invalid', __('Stored Adoology credential is invalid.', 'adoology-connector'));
+            return new WP_Error('adoology_ciphertext_invalid', __('Stored Adoology credential is invalid.', 'adoology-for-woocommerce'));
         }
 
         $iv = base64_decode((string) $data['iv'], true);
@@ -110,7 +110,7 @@ class Crypto
         $ciphertext = base64_decode((string) $data['ct'], true);
 
         if (!is_string($iv) || strlen($iv) !== 12 || !is_string($tag) || strlen($tag) !== 16 || !is_string($ciphertext)) {
-            return new WP_Error('adoology_ciphertext_invalid', __('Stored Adoology credential is invalid.', 'adoology-connector'));
+            return new WP_Error('adoology_ciphertext_invalid', __('Stored Adoology credential is invalid.', 'adoology-for-woocommerce'));
         }
 
         $plaintext = openssl_decrypt(
@@ -124,7 +124,7 @@ class Crypto
         );
 
         if (!is_string($plaintext)) {
-            return new WP_Error('adoology_decrypt_failed', __('Stored Adoology credential could not be decrypted. WordPress salts may have changed.', 'adoology-connector'));
+            return new WP_Error('adoology_decrypt_failed', __('Stored Adoology credential could not be decrypted. WordPress salts may have changed.', 'adoology-for-woocommerce'));
         }
 
         return $plaintext;
@@ -151,7 +151,7 @@ class Crypto
         }
 
         if (!Options::update($option, $encrypted) && (string) Options::get($option, '') !== $encrypted) {
-            return new WP_Error('adoology_secret_store_failed', __('Credential storage failed.', 'adoology-connector'));
+            return new WP_Error('adoology_secret_store_failed', __('Credential storage failed.', 'adoology-for-woocommerce'));
         }
 
         return true;

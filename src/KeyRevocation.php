@@ -51,7 +51,7 @@ class KeyRevocation
         $signature = strtolower((string) $request->get_header('X-Adoology-Signature'));
         $payload = json_decode($raw, true);
         if (!is_array($payload) || !preg_match('/^[a-f0-9]{64}$/', $signature)) {
-            return new WP_Error('adoology_revoke_invalid', __('Invalid revocation request.', 'adoology-connector'), ['status' => 401]);
+            return new WP_Error('adoology_revoke_invalid', __('Invalid revocation request.', 'adoology-for-woocommerce'), ['status' => 401]);
         }
 
         $connection_id = sanitize_text_field((string) ($payload['connection_id'] ?? ''));
@@ -67,7 +67,7 @@ class KeyRevocation
             if ($pending_created_at <= 0 || abs(time() - $pending_created_at) > DAY_IN_SECONDS) {
                 self::clear_pending();
 
-                return new WP_Error('adoology_revoke_expired', __('Revocation request expired.', 'adoology-connector'), ['status' => 401]);
+                return new WP_Error('adoology_revoke_expired', __('Revocation request expired.', 'adoology-for-woocommerce'), ['status' => 401]);
             }
         }
 
@@ -75,7 +75,7 @@ class KeyRevocation
             $key_id <= 0 || !preg_match('/^[a-f0-9]{64}$/D', $consumer_key) || abs(time() - $timestamp) > 300 ||
             is_wp_error($secret) || $secret === '' ||
             !hash_equals(hash_hmac('sha256', $raw, $secret), $signature)) {
-            return new WP_Error('adoology_revoke_invalid', __('Invalid revocation signature.', 'adoology-connector'), ['status' => 401]);
+            return new WP_Error('adoology_revoke_invalid', __('Invalid revocation signature.', 'adoology-for-woocommerce'), ['status' => 401]);
         }
 
         $replay_key = 'adoology_revoke_' . hash('sha256', $signature);
@@ -92,7 +92,7 @@ class KeyRevocation
             $key_id
         )) !== null;
         if ($deleted === false || $key_still_exists) {
-            return new WP_Error('adoology_revoke_failed', __('API key revocation failed.', 'adoology-connector'), ['status' => 500]);
+            return new WP_Error('adoology_revoke_failed', __('API key revocation failed.', 'adoology-for-woocommerce'), ['status' => 500]);
         }
         set_transient($replay_key, 1, 10 * MINUTE_IN_SECONDS);
 

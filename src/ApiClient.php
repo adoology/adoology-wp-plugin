@@ -38,21 +38,21 @@ class ApiClient
     {
         $url = untrailingslashit(trim((string) $url));
         if ($url === '' || !wp_http_validate_url($url)) {
-            return new WP_Error('adoology_invalid_api_url', __('Enter a valid public HTTPS Adoology API base URL.', 'adoology-connector'));
+            return new WP_Error('adoology_invalid_api_url', __('Enter a valid public HTTPS Adoology API base URL.', 'adoology-for-woocommerce'));
         }
 
         $parts = wp_parse_url($url);
         if (!is_array($parts) || strtolower((string) $parts['scheme']) !== 'https' || empty($parts['host'])) {
-            return new WP_Error('adoology_invalid_api_url', __('Adoology API URL must use HTTPS.', 'adoology-connector'));
+            return new WP_Error('adoology_invalid_api_url', __('Adoology API URL must use HTTPS.', 'adoology-for-woocommerce'));
         }
 
         if (isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) {
-            return new WP_Error('adoology_invalid_api_url', __('Adoology API URL cannot contain credentials, a query, or a fragment.', 'adoology-connector'));
+            return new WP_Error('adoology_invalid_api_url', __('Adoology API URL cannot contain credentials, a query, or a fragment.', 'adoology-for-woocommerce'));
         }
 
         $path = isset($parts['path']) ? strtolower(untrailingslashit((string) $parts['path'])) : '';
         if (preg_match('#/(?:api|api/v1|v1)$#', $path)) {
-            return new WP_Error('adoology_versioned_api_url', __('Enter the API base URL without /api or /v1.', 'adoology-connector'));
+            return new WP_Error('adoology_versioned_api_url', __('Enter the API base URL without /api or /v1.', 'adoology-for-woocommerce'));
         }
 
         return esc_url_raw($url, ['https']);
@@ -108,16 +108,16 @@ class ApiClient
         $timeout = max(1, min(20, (int) $timeout));
 
         if (!in_array($method, ['GET', 'POST', 'PATCH', 'DELETE'], true)) {
-            return new WP_Error('adoology_invalid_method', __('Unsupported Adoology API method.', 'adoology-connector'));
+            return new WP_Error('adoology_invalid_method', __('Unsupported Adoology API method.', 'adoology-for-woocommerce'));
         }
 
         if (!is_string($path) || !preg_match('#^/[A-Za-z0-9_/%.-]*$#D', $path) || strpos($path, '..') !== false) {
-            return new WP_Error('adoology_invalid_path', __('Invalid Adoology API path.', 'adoology-connector'));
+            return new WP_Error('adoology_invalid_path', __('Invalid Adoology API path.', 'adoology-for-woocommerce'));
         }
 
         $base_url = self::base_url();
         if ($base_url === '') {
-            return new WP_Error('adoology_invalid_api_url', __('Configured Adoology API URL is invalid.', 'adoology-connector'));
+            return new WP_Error('adoology_invalid_api_url', __('Configured Adoology API URL is invalid.', 'adoology-for-woocommerce'));
         }
 
         $token = self::token();
@@ -125,20 +125,20 @@ class ApiClient
             return $token;
         }
         if (!self::is_valid_token($token)) {
-            return new WP_Error('adoology_no_token', __('Enter a valid Adoology workspace API key beginning with dc_.', 'adoology-connector'));
+            return new WP_Error('adoology_no_token', __('Enter a valid Adoology workspace API key beginning with dc_.', 'adoology-for-woocommerce'));
         }
 
         $url = $base_url . '/v1' . $path;
         $url_path = (string) wp_parse_url($url, PHP_URL_PATH);
         if (strpos($url_path, '/api/v1') !== false || !wp_http_validate_url($url)) {
-            return new WP_Error('adoology_invalid_api_url', __('Refusing an unsafe or legacy Adoology API URL.', 'adoology-connector'));
+            return new WP_Error('adoology_invalid_api_url', __('Refusing an unsafe or legacy Adoology API URL.', 'adoology-for-woocommerce'));
         }
 
         if (in_array($method, $writes, true) && $idempotency_key === '') {
             $idempotency_key = self::new_idempotency_key();
         }
         if ($idempotency_key !== '' && !preg_match('/^[A-Za-z0-9._:-]{8,200}$/D', $idempotency_key)) {
-            return new WP_Error('adoology_invalid_idempotency_key', __('Invalid idempotency key.', 'adoology-connector'));
+            return new WP_Error('adoology_invalid_idempotency_key', __('Invalid idempotency key.', 'adoology-for-woocommerce'));
         }
 
         $headers = [
@@ -154,7 +154,7 @@ class ApiClient
         if ($body !== null) {
             $encoded_body = wp_json_encode($body);
             if (!is_string($encoded_body)) {
-                return new WP_Error('adoology_json_encode_failed', __('Could not encode the Adoology API request.', 'adoology-connector'));
+                return new WP_Error('adoology_json_encode_failed', __('Could not encode the Adoology API request.', 'adoology-for-woocommerce'));
             }
         }
 
@@ -188,7 +188,7 @@ class ApiClient
         if (is_wp_error($last_response)) {
             Logger::log('error', 'Adoology API transport failure.', ['method' => $method, 'path' => $path]);
 
-            return new WP_Error('adoology_api_transport', __('Could not reach the Adoology API.', 'adoology-connector'));
+            return new WP_Error('adoology_api_transport', __('Could not reach the Adoology API.', 'adoology-for-woocommerce'));
         }
 
         $status = (int) wp_remote_retrieve_response_code($last_response);
@@ -215,7 +215,7 @@ class ApiClient
         if (!$is_json || !is_array($decoded) || json_last_error() !== JSON_ERROR_NONE) {
             Logger::log('error', 'Adoology API returned invalid JSON.', ['method' => $method, 'path' => $path, 'status' => $status]);
 
-            return new WP_Error('adoology_api_invalid_json', __('Adoology API returned an invalid JSON response.', 'adoology-connector'), ['status' => $status]);
+            return new WP_Error('adoology_api_invalid_json', __('Adoology API returned an invalid JSON response.', 'adoology-for-woocommerce'), ['status' => $status]);
         }
 
         return $decoded;
@@ -390,7 +390,7 @@ class ApiClient
         if ($message === '') {
             $message = sprintf(
                 /* translators: %d: HTTP response status. */
-                __('Adoology API request failed with HTTP %d.', 'adoology-connector'),
+                __('Adoology API request failed with HTTP %d.', 'adoology-for-woocommerce'),
                 (int) $status
             );
         }

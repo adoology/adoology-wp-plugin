@@ -385,7 +385,7 @@ class Webhooks
         if ($attempt >= self::RETRY_LIMIT) {
             self::clear_retry($event_id);
             Options::update('adoology_last_error', [
-                'message' => __('A product webhook exhausted its delivery retries.', 'adoology-connector'),
+                'message' => __('A product webhook exhausted its delivery retries.', 'adoology-for-woocommerce'),
                 'time' => gmdate('Y-m-d H:i:s'),
             ]);
             Logger::log('error', 'Adoology webhook retries exhausted.', ['webhook_id' => $webhook_id, 'status' => $status]);

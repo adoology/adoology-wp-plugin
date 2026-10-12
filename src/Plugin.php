@@ -69,7 +69,7 @@ final class Plugin
     {
         if (is_multisite() && $network_wide) {
             deactivate_plugins(plugin_basename(ADOOLOGY_PLUGIN_FILE), true, true);
-            wp_die(esc_html__('Adoology for WooCommerce must be activated separately on each site.', 'adoology-connector'));
+            wp_die(esc_html__('Adoology for WooCommerce must be activated separately on each site.', 'adoology-for-woocommerce'));
         }
         Options::install_defaults();
         Database::install();
@@ -128,7 +128,7 @@ final class Plugin
     {
         $schedules['adoology_five_minutes'] = [
             'interval' => 5 * MINUTE_IN_SECONDS,
-            'display' => __('Every five minutes', 'adoology-connector'),
+            'display' => __('Every five minutes', 'adoology-for-woocommerce'),
         ];
 
         return $schedules;
@@ -149,11 +149,12 @@ final class Plugin
      */
     public static function woocommerce_missing_notice()
     {
-        if (!current_user_can('activate_plugins')) {
+        $screen = get_current_screen();
+        if (!current_user_can('activate_plugins') || !$screen || $screen->base !== 'plugins') {
             return;
         }
         echo '<div class="notice notice-error"><p>';
-        esc_html_e('Adoology for WooCommerce requires WooCommerce to be installed and active.', 'adoology-connector');
+        esc_html_e('Adoology for WooCommerce requires WooCommerce to be installed and active. Install and activate WooCommerce from the Plugins screen.', 'adoology-for-woocommerce');
         echo '</p></div>';
     }
 
@@ -162,11 +163,12 @@ final class Plugin
      */
     public static function woocommerce_version_notice()
     {
-        if (!current_user_can('activate_plugins')) {
+        $screen = get_current_screen();
+        if (!current_user_can('activate_plugins') || !$screen || $screen->base !== 'plugins') {
             return;
         }
         echo '<div class="notice notice-error"><p>';
-        esc_html_e('Adoology for WooCommerce requires WooCommerce 8.0 or newer.', 'adoology-connector');
+        esc_html_e('Adoology for WooCommerce requires WooCommerce 8.0 or newer. Update WooCommerce from the Plugins screen.', 'adoology-for-woocommerce');
         echo '</p></div>';
     }
 
@@ -178,7 +180,7 @@ final class Plugin
      */
     public static function action_links($links)
     {
-        $settings_link = '<a href="' . admin_url('admin.php?page=adoology') . '">' . esc_html__('Dashboard', 'adoology-connector') . '</a>';
+        $settings_link = '<a href="' . esc_url(admin_url('admin.php?page=adoology')) . '">' . esc_html__('Dashboard', 'adoology-for-woocommerce') . '</a>';
         array_unshift($links, $settings_link);
 
         return $links;

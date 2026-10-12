@@ -19,6 +19,11 @@ class Settings
     private static $instance = null;
 
     /**
+     * @var array<string|false>
+     */
+    private $page_hooks = [];
+
+    /**
      * @return Settings
      */
     public static function get_instance()
@@ -34,6 +39,7 @@ class Settings
     {
         add_action('admin_menu', [$this, 'add_menu']);
         add_action('admin_init', [$this, 'register_settings']);
+        add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
         add_action('admin_post_adoology_connect', [$this, 'handle_connect']);
         add_action('admin_post_adoology_test_connection', [$this, 'handle_test_connection']);
         add_action('admin_post_adoology_disconnect', [$this, 'handle_disconnect']);
@@ -48,23 +54,38 @@ class Settings
      */
     public function add_menu()
     {
-        add_menu_page(
-            __('Adoology', 'adoology-connector'),
-            __('Adoology', 'adoology-connector'),
+        $this->page_hooks[] = add_menu_page(
+            __('Adoology', 'adoology-for-woocommerce'),
+            __('Adoology', 'adoology-for-woocommerce'),
             'manage_woocommerce',
             'adoology',
             [$this, 'render_dashboard'],
             'dashicons-shield-alt',
             56
         );
-        add_submenu_page('adoology', __('Adoology Dashboard', 'adoology-connector'), __('Dashboard', 'adoology-connector'), 'manage_woocommerce', 'adoology', [$this, 'render_dashboard']);
-        add_submenu_page('adoology', __('Adoology Connection', 'adoology-connector'), __('Connection', 'adoology-connector'), 'manage_woocommerce', 'adoology-connection', [$this, 'render_settings_page']);
-        add_submenu_page('adoology', __('Adoology Sync', 'adoology-connector'), __('Sync', 'adoology-connector'), 'manage_woocommerce', 'adoology-sync', [$this, 'render_sync']);
-        add_submenu_page('adoology', __('Incomplete Orders', 'adoology-connector'), __('Incomplete Orders', 'adoology-connector'), 'manage_woocommerce', 'adoology-incomplete', [$this, 'render_incomplete_orders']);
-        add_submenu_page('adoology', __('Fraud Protection', 'adoology-connector'), __('Fraud Protection', 'adoology-connector'), 'manage_woocommerce', 'adoology-fraud', [$this, 'render_fraud']);
-        add_submenu_page('adoology', __('Adoology Order Form', 'adoology-connector'), __('Order Form', 'adoology-connector'), 'manage_woocommerce', 'adoology-order-form', [$this, 'render_order_form']);
-        add_submenu_page('adoology', __('Adoology Settings', 'adoology-connector'), __('Settings', 'adoology-connector'), 'manage_woocommerce', 'adoology-settings', [$this, 'render_feature_settings']);
-        add_submenu_page('adoology', __('Adoology Logs', 'adoology-connector'), __('Logs', 'adoology-connector'), 'manage_woocommerce', 'adoology-logs', [$this, 'render_logs']);
+        $this->page_hooks[] = add_submenu_page('adoology', __('Adoology Dashboard', 'adoology-for-woocommerce'), __('Dashboard', 'adoology-for-woocommerce'), 'manage_woocommerce', 'adoology', [$this, 'render_dashboard']);
+        $this->page_hooks[] = add_submenu_page('adoology', __('Adoology Connection', 'adoology-for-woocommerce'), __('Connection', 'adoology-for-woocommerce'), 'manage_woocommerce', 'adoology-connection', [$this, 'render_settings_page']);
+        $this->page_hooks[] = add_submenu_page('adoology', __('Adoology Sync', 'adoology-for-woocommerce'), __('Sync', 'adoology-for-woocommerce'), 'manage_woocommerce', 'adoology-sync', [$this, 'render_sync']);
+        $this->page_hooks[] = add_submenu_page('adoology', __('Incomplete Orders', 'adoology-for-woocommerce'), __('Incomplete Orders', 'adoology-for-woocommerce'), 'manage_woocommerce', 'adoology-incomplete', [$this, 'render_incomplete_orders']);
+        $this->page_hooks[] = add_submenu_page('adoology', __('Fraud Protection', 'adoology-for-woocommerce'), __('Fraud Protection', 'adoology-for-woocommerce'), 'manage_woocommerce', 'adoology-fraud', [$this, 'render_fraud']);
+        $this->page_hooks[] = add_submenu_page('adoology', __('Adoology Order Form', 'adoology-for-woocommerce'), __('Order Form', 'adoology-for-woocommerce'), 'manage_woocommerce', 'adoology-order-form', [$this, 'render_order_form']);
+        $this->page_hooks[] = add_submenu_page('adoology', __('Adoology Settings', 'adoology-for-woocommerce'), __('Settings', 'adoology-for-woocommerce'), 'manage_woocommerce', 'adoology-settings', [$this, 'render_feature_settings']);
+        $this->page_hooks[] = add_submenu_page('adoology', __('Adoology Logs', 'adoology-for-woocommerce'), __('Logs', 'adoology-for-woocommerce'), 'manage_woocommerce', 'adoology-logs', [$this, 'render_logs']);
+    }
+
+    /**
+     * Load assets only on this plugin's administration pages.
+     *
+     * @param  string  $hook_suffix  Current administration page hook.
+     */
+    public function enqueue_assets($hook_suffix)
+    {
+        if (!current_user_can('manage_woocommerce') || !in_array($hook_suffix, $this->page_hooks, true)) {
+            return;
+        }
+
+        wp_enqueue_style('adoology-admin', plugins_url('assets/css/admin.css', ADOOLOGY_PLUGIN_FILE), [], ADOOLOGY_VERSION);
+        wp_enqueue_script('adoology-admin', plugins_url('assets/js/admin.js', ADOOLOGY_PLUGIN_FILE), [], ADOOLOGY_VERSION, true);
     }
 
     /**
@@ -130,12 +151,12 @@ class Settings
         $current = (string) Options::get('adoology_api_base_url', 'https://api.adoology.com');
         if ($current !== '' && !hash_equals($current, $validated)) {
             if (Connection::is_connected()) {
-                add_settings_error('adoology_api_base_url', 'api_url_locked', __('Disconnect the store before changing the Adoology API URL.', 'adoology-connector'));
+                add_settings_error('adoology_api_base_url', 'api_url_locked', __('Disconnect the store before changing the Adoology API URL.', 'adoology-for-woocommerce'));
 
                 return $current;
             }
             Options::delete('adoology_api_token');
-            add_settings_error('adoology_api_base_url', 'api_url_changed', __('API URL changed. Enter the workspace API key again.', 'adoology-connector'), 'warning');
+            add_settings_error('adoology_api_base_url', 'api_url_changed', __('API URL changed. Enter the workspace API key again.', 'adoology-for-woocommerce'), 'warning');
         }
 
         return $validated;
@@ -158,7 +179,7 @@ class Settings
             return is_wp_error(Crypto::decrypt($value, 'adoology_api_token')) ? $stored : $value;
         }
         if (!ApiClient::is_valid_token($value)) {
-            add_settings_error('adoology_api_token', 'invalid_api_token', __('Enter a valid Adoology workspace API key beginning with dc_.', 'adoology-connector'));
+            add_settings_error('adoology_api_token', 'invalid_api_token', __('Enter a valid Adoology workspace API key beginning with dc_.', 'adoology-for-woocommerce'));
 
             return $stored;
         }
@@ -265,7 +286,7 @@ class Settings
         $this->authorize_action('adoology_sync_products');
         $connection_id = Connection::connection_id();
         $result = $connection_id === ''
-            ? new WP_Error('adoology_not_connected', __('Connect the store before starting synchronization.', 'adoology-connector'))
+            ? new WP_Error('adoology_not_connected', __('Connect the store before starting synchronization.', 'adoology-for-woocommerce'))
             : ApiClient::start_product_sync($connection_id);
         $this->redirect_with_result('adoology_sync', is_wp_error($result) ? $result : true);
     }
@@ -300,90 +321,90 @@ class Settings
         $token_set = Crypto::has_secret('adoology_api_token');
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e('Adoology', 'adoology-connector'); ?></h1>
+            <h1><?php esc_html_e('Adoology', 'adoology-for-woocommerce'); ?></h1>
             <?php settings_errors(); ?>
             <?php $this->render_action_notice(); ?>
 
-            <h2><?php esc_html_e('Connection', 'adoology-connector'); ?></h2>
+            <h2><?php esc_html_e('Connection', 'adoology-for-woocommerce'); ?></h2>
             <table class="form-table" role="presentation">
                 <tr>
-                    <th scope="row"><?php esc_html_e('Status', 'adoology-connector'); ?></th>
+                    <th scope="row"><?php esc_html_e('Status', 'adoology-for-woocommerce'); ?></th>
                     <td><strong><?php echo esc_html(ucwords(str_replace('_', ' ', $status))); ?></strong></td>
                 </tr>
                 <?php if (!empty($state['name'])) : ?>
                     <tr>
-                        <th scope="row"><?php esc_html_e('Store', 'adoology-connector'); ?></th>
+                        <th scope="row"><?php esc_html_e('Store', 'adoology-for-woocommerce'); ?></th>
                         <td><?php echo esc_html((string) $state['name']); ?></td>
                     </tr>
                 <?php endif; ?>
                 <?php if (!empty($state['base_url'])) : ?>
                     <tr>
-                        <th scope="row"><?php esc_html_e('Store URL', 'adoology-connector'); ?></th>
+                        <th scope="row"><?php esc_html_e('Store URL', 'adoology-for-woocommerce'); ?></th>
                         <td><code><?php echo esc_html((string) $state['base_url']); ?></code></td>
                     </tr>
                 <?php endif; ?>
                 <?php if ($connection_id !== '') : ?>
                     <tr>
-                        <th scope="row"><?php esc_html_e('Connection ID', 'adoology-connector'); ?></th>
+                        <th scope="row"><?php esc_html_e('Connection ID', 'adoology-for-woocommerce'); ?></th>
                         <td><code><?php echo esc_html($connection_id); ?></code></td>
                     </tr>
                 <?php endif; ?>
                 <?php if (!empty($state['checked_at'])) : ?>
                     <tr>
-                        <th scope="row"><?php esc_html_e('Last checked', 'adoology-connector'); ?></th>
+                        <th scope="row"><?php esc_html_e('Last checked', 'adoology-for-woocommerce'); ?></th>
                         <td><?php echo esc_html((string) $state['checked_at']); ?> UTC</td>
                     </tr>
                 <?php endif; ?>
                 <?php if (!empty($state['last_full_sync_at'])) : ?>
                     <tr>
-                        <th scope="row"><?php esc_html_e('Last full sync', 'adoology-connector'); ?></th>
+                        <th scope="row"><?php esc_html_e('Last full sync', 'adoology-for-woocommerce'); ?></th>
                         <td><?php echo esc_html((string) $state['last_full_sync_at']); ?></td>
                     </tr>
                 <?php endif; ?>
                 <?php if (isset($state['error_count'])) : ?>
                     <tr>
-                        <th scope="row"><?php esc_html_e('API errors', 'adoology-connector'); ?></th>
+                        <th scope="row"><?php esc_html_e('API errors', 'adoology-for-woocommerce'); ?></th>
                         <td><?php echo esc_html((string) (int) $state['error_count']); ?></td>
                     </tr>
                 <?php endif; ?>
             </table>
 
-            <h2><?php esc_html_e('Credentials', 'adoology-connector'); ?></h2>
+            <h2><?php esc_html_e('Credentials', 'adoology-for-woocommerce'); ?></h2>
             <form method="post" action="options.php">
                 <?php settings_fields('adoology_settings'); ?>
                 <table class="form-table" role="presentation">
                     <tr>
-                        <th scope="row"><label for="adoology_api_base_url"><?php esc_html_e('Adoology API URL', 'adoology-connector'); ?></label></th>
+                        <th scope="row"><label for="adoology_api_base_url"><?php esc_html_e('Adoology API URL', 'adoology-for-woocommerce'); ?></label></th>
                         <td><input name="adoology_api_base_url" id="adoology_api_base_url" type="url" class="regular-text" value="<?php echo esc_attr((string) Options::get('adoology_api_base_url', 'https://api.adoology.com')); ?>" required /></td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="adoology_api_token"><?php esc_html_e('Workspace API Key', 'adoology-connector'); ?></label></th>
+                        <th scope="row"><label for="adoology_api_token"><?php esc_html_e('Workspace API Key', 'adoology-for-woocommerce'); ?></label></th>
                         <td>
-                            <input name="adoology_api_token" id="adoology_api_token" type="password" class="regular-text" value="" autocomplete="new-password" maxlength="512" placeholder="<?php echo $token_set ? esc_attr__('Key saved; leave blank to keep it', 'adoology-connector') : 'dc_...'; ?>" />
-                            <p class="description"><?php esc_html_e('Stored encrypted. Existing keys are never rendered into HTML.', 'adoology-connector'); ?></p>
+                            <input name="adoology_api_token" id="adoology_api_token" type="password" class="regular-text" value="" autocomplete="new-password" maxlength="512" placeholder="<?php echo $token_set ? esc_attr__('Key saved; leave blank to keep it', 'adoology-for-woocommerce') : 'dc_...'; ?>" />
+                            <p class="description"><?php esc_html_e('Stored encrypted. Existing keys are never rendered into HTML.', 'adoology-for-woocommerce'); ?></p>
                         </td>
                     </tr>
                 </table>
-                <?php submit_button(__('Save Credentials', 'adoology-connector')); ?>
+                <?php submit_button(__('Save Credentials', 'adoology-for-woocommerce')); ?>
             </form>
 
             <?php if ($connection_id === '') : ?>
                 <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                     <?php wp_nonce_field('adoology_connect'); ?>
                     <input type="hidden" name="action" value="adoology_connect" />
-                    <?php submit_button(__('Connect Store', 'adoology-connector'), 'primary', 'submit', false, $token_set ? [] : ['disabled' => 'disabled']); ?>
+                    <?php submit_button(__('Connect Store', 'adoology-for-woocommerce'), 'primary', 'submit', false, $token_set ? [] : ['disabled' => 'disabled']); ?>
                 </form>
             <?php else : ?>
-                <p><?php esc_html_e('Adoology owns WooCommerce API-key provisioning, webhooks, and initial synchronization for this connection.', 'adoology-connector'); ?></p>
-                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-right:8px;">
+                <p><?php esc_html_e('Adoology owns WooCommerce API-key provisioning, webhooks, and initial synchronization for this connection.', 'adoology-for-woocommerce'); ?></p>
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="adoology-connection-action">
                     <?php wp_nonce_field('adoology_test_connection'); ?>
                     <input type="hidden" name="action" value="adoology_test_connection" />
-                    <?php submit_button(__('Test Connection', 'adoology-connector'), 'secondary', 'submit', false); ?>
+                    <?php submit_button(__('Test Connection', 'adoology-for-woocommerce'), 'secondary', 'submit', false); ?>
                 </form>
-                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block;" onsubmit="return confirm('<?php echo esc_js(__('Disconnect this store from Adoology?', 'adoology-connector')); ?>');">
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="adoology-connection-action" data-adoology-confirm="<?php echo esc_attr__('Disconnect this store from Adoology?', 'adoology-for-woocommerce'); ?>">
                     <?php wp_nonce_field('adoology_disconnect'); ?>
                     <input type="hidden" name="action" value="adoology_disconnect" />
-                    <?php submit_button(__('Disconnect', 'adoology-connector'), 'delete', 'submit', false); ?>
+                    <?php submit_button(__('Disconnect', 'adoology-for-woocommerce'), 'delete', 'submit', false); ?>
                 </form>
             <?php endif; ?>
         </div>
@@ -417,33 +438,32 @@ class Settings
         $last_sync = $state['last_full_sync_at'] ?? null;
         $last_sync_timestamp = is_string($last_sync) ? strtotime($last_sync) : false;
         $last_sync_display = $last_sync_timestamp === false
-            ? __('Not available', 'adoology-connector')
+            ? __('Not available', 'adoology-for-woocommerce')
             : sprintf(
                 /* translators: 1: date, 2: time. */
-                __('%1$s at %2$s', 'adoology-connector'),
+                __('%1$s at %2$s', 'adoology-for-woocommerce'),
                 wp_date(get_option('date_format'), $last_sync_timestamp),
                 wp_date(get_option('time_format'), $last_sync_timestamp)
             );
         $cards = [
-            __('Connection', 'adoology-connector') => ucfirst((string) ($state['status'] ?? 'not connected')),
-            __('Queued events', 'adoology-connector') => $this->group_count($events, ['pending', 'retrying']),
-            __('Sent events', 'adoology-connector') => $this->group_count($events, ['sent']),
-            __('Incomplete orders', 'adoology-connector') => $this->group_count($incomplete, ['incomplete']),
-            __('Recovered orders', 'adoology-connector') => $this->group_count($incomplete, ['recovered']),
-            __('Flagged orders', 'adoology-connector') => is_object($risk_orders) && isset($risk_orders->total) ? (int) $risk_orders->total : 0,
-            __('API errors', 'adoology-connector') => (int) ($state['error_count'] ?? 0),
-            __('Last successful sync', 'adoology-connector') => $last_sync_display,
+            __('Connection', 'adoology-for-woocommerce') => ucfirst((string) ($state['status'] ?? 'not connected')),
+            __('Queued events', 'adoology-for-woocommerce') => $this->group_count($events, ['pending', 'retrying']),
+            __('Sent events', 'adoology-for-woocommerce') => $this->group_count($events, ['sent']),
+            __('Incomplete orders', 'adoology-for-woocommerce') => $this->group_count($incomplete, ['incomplete']),
+            __('Recovered orders', 'adoology-for-woocommerce') => $this->group_count($incomplete, ['recovered']),
+            __('Flagged orders', 'adoology-for-woocommerce') => is_object($risk_orders) && isset($risk_orders->total) ? (int) $risk_orders->total : 0,
+            __('API errors', 'adoology-for-woocommerce') => (int) ($state['error_count'] ?? 0),
+            __('Last successful sync', 'adoology-for-woocommerce') => $last_sync_display,
         ];
         ?>
-        <div class="wrap"><h1><?php esc_html_e('Adoology Dashboard', 'adoology-connector'); ?></h1>
+        <div class="wrap"><h1><?php esc_html_e('Adoology Dashboard', 'adoology-for-woocommerce'); ?></h1>
             <?php $this->render_action_notice(); ?>
-            <?php $this->admin_styles(); ?>
             <div class="adoology-cards">
                 <?php foreach ($cards as $label => $value) : ?>
                     <div class="adoology-card"><span><?php echo esc_html($label); ?></span><strong><?php echo esc_html((string) $value); ?></strong></div>
                 <?php endforeach; ?>
             </div>
-            <p><a class="button button-primary" href="<?php echo esc_url(admin_url('admin.php?page=adoology-sync')); ?>"><?php esc_html_e('Open synchronization', 'adoology-connector'); ?></a> <a class="button" href="<?php echo esc_url(admin_url('admin.php?page=adoology-incomplete')); ?>"><?php esc_html_e('View incomplete orders', 'adoology-connector'); ?></a></p>
+            <p><a class="button button-primary" href="<?php echo esc_url(admin_url('admin.php?page=adoology-sync')); ?>"><?php esc_html_e('Open synchronization', 'adoology-for-woocommerce'); ?></a> <a class="button" href="<?php echo esc_url(admin_url('admin.php?page=adoology-incomplete')); ?>"><?php esc_html_e('View incomplete orders', 'adoology-for-woocommerce'); ?></a></p>
         </div>
         <?php
     }
@@ -455,19 +475,19 @@ class Settings
     {
         $this->guard_page();
         $connection_id = Connection::connection_id();
-        $runs = $connection_id ? ApiClient::get_sync_runs($connection_id) : new WP_Error('not_connected', __('Store is not connected.', 'adoology-connector'));
+        $runs = $connection_id ? ApiClient::get_sync_runs($connection_id) : new WP_Error('not_connected', __('Store is not connected.', 'adoology-for-woocommerce'));
         ?>
-        <div class="wrap"><h1><?php esc_html_e('Adoology Sync', 'adoology-connector'); ?></h1>
+        <div class="wrap"><h1><?php esc_html_e('Adoology Sync', 'adoology-for-woocommerce'); ?></h1>
             <?php $this->render_action_notice(); ?>
-            <p><?php esc_html_e('Adoology automatically imports products, orders, and customers after WooCommerce authorization. Product sync can also be started manually.', 'adoology-connector'); ?></p>
+            <p><?php esc_html_e('Adoology automatically imports products, orders, and customers after WooCommerce authorization. Product sync can also be started manually.', 'adoology-for-woocommerce'); ?></p>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                 <?php wp_nonce_field('adoology_sync_products'); ?><input type="hidden" name="action" value="adoology_sync_products" />
-                <?php submit_button(__('Sync Products Now', 'adoology-connector'), 'primary', 'submit', false, $connection_id ? [] : ['disabled' => 'disabled']); ?>
+                <?php submit_button(__('Sync Products Now', 'adoology-for-woocommerce'), 'primary', 'submit', false, $connection_id ? [] : ['disabled' => 'disabled']); ?>
             </form>
-            <h2><?php esc_html_e('Recent Runs', 'adoology-connector'); ?></h2>
+            <h2><?php esc_html_e('Recent Runs', 'adoology-for-woocommerce'); ?></h2>
             <?php if (is_wp_error($runs)) : ?><div class="notice notice-warning inline"><p><?php echo esc_html($runs->get_error_message()); ?></p></div>
             <?php else : ?>
-                <table class="widefat striped"><thead><tr><th><?php esc_html_e('Resource', 'adoology-connector'); ?></th><th><?php esc_html_e('Mode', 'adoology-connector'); ?></th><th><?php esc_html_e('Status', 'adoology-connector'); ?></th><th><?php esc_html_e('Processed', 'adoology-connector'); ?></th><th><?php esc_html_e('Failed', 'adoology-connector'); ?></th><th><?php esc_html_e('Updated', 'adoology-connector'); ?></th></tr></thead><tbody>
+                <table class="widefat striped"><thead><tr><th><?php esc_html_e('Resource', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Mode', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Status', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Processed', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Failed', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Updated', 'adoology-for-woocommerce'); ?></th></tr></thead><tbody>
                 <?php foreach ((array) ($runs['data'] ?? []) as $run) : $attributes = (array) ($run['attributes'] ?? []); ?>
                     <tr><td><?php echo esc_html((string) ($attributes['resource'] ?? '')); ?></td><td><?php echo esc_html((string) ($attributes['mode'] ?? '')); ?></td><td><?php echo esc_html((string) ($attributes['status'] ?? '')); ?></td><td><?php echo esc_html((string) (int) ($attributes['records_processed'] ?? 0)); ?></td><td><?php echo esc_html((string) (int) ($attributes['records_failed'] ?? 0)); ?></td><td><?php echo esc_html((string) ($attributes['updated_at'] ?? '')); ?></td></tr>
                 <?php endforeach; ?>
@@ -495,13 +515,13 @@ class Settings
         $incomplete_table = Database::incomplete_table();
         $rows = $wpdb->get_results("SELECT * FROM {$incomplete_table} ORDER BY updated_at DESC LIMIT 100", ARRAY_A);
         ?>
-        <div class="wrap"><h1><?php esc_html_e('Incomplete Orders', 'adoology-connector'); ?></h1>
-            <p><?php esc_html_e('Checkout and landing-page starts are marked incomplete after the configured inactivity window. Records are read-only here; contact, recovery, and order creation are managed in Adoology.', 'adoology-connector'); ?></p>
-            <table class="widefat striped"><thead><tr><th><?php esc_html_e('Status', 'adoology-connector'); ?></th><th><?php esc_html_e('Flow', 'adoology-connector'); ?></th><th><?php esc_html_e('Customer', 'adoology-connector'); ?></th><th><?php esc_html_e('Product', 'adoology-connector'); ?></th><th><?php esc_html_e('Value', 'adoology-connector'); ?></th><th><?php esc_html_e('Stage', 'adoology-connector'); ?></th><th><?php esc_html_e('Last activity', 'adoology-connector'); ?></th><th><?php esc_html_e('Order', 'adoology-connector'); ?></th><th></th></tr></thead><tbody>
-            <?php if (!$rows) : ?><tr><td colspan="9"><?php esc_html_e('No tracked checkouts.', 'adoology-connector'); ?></td></tr><?php endif; ?>
+        <div class="wrap"><h1><?php esc_html_e('Incomplete Orders', 'adoology-for-woocommerce'); ?></h1>
+            <p><?php esc_html_e('Checkout and landing-page starts are marked incomplete after the configured inactivity window. Records are read-only here; contact, recovery, and order creation are managed in Adoology.', 'adoology-for-woocommerce'); ?></p>
+            <table class="widefat striped"><thead><tr><th><?php esc_html_e('Status', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Flow', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Customer', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Product', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Value', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Stage', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Last activity', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Order', 'adoology-for-woocommerce'); ?></th><th></th></tr></thead><tbody>
+            <?php if (!$rows) : ?><tr><td colspan="9"><?php esc_html_e('No tracked checkouts.', 'adoology-for-woocommerce'); ?></td></tr><?php endif; ?>
             <?php foreach ($rows as $row) : $customer = $this->checkout_customer($row);
                 $product = wc_get_product((int) ($row['variation_id'] ?: $row['product_id'])); ?>
-                <tr><td><strong><?php echo esc_html(ucfirst($row['status'])); ?></strong></td><td><?php echo esc_html(str_replace('_', ' ', $row['flow'])); ?></td><td><?php echo esc_html(trim(($customer['name'] ?? '') . ' ' . ($customer['phone'] ?? '')) ?: __('Anonymous', 'adoology-connector')); ?></td><td><?php echo esc_html($product ? $product->get_name() : '#' . $row['product_id']); ?> × <?php echo esc_html((string) $row['quantity']); ?></td><td><?php echo wp_kses_post(wc_price(((int) $row['value_minor']) / 10 ** wc_get_price_decimals(), ['currency' => $row['currency']])); ?></td><td><?php echo esc_html($row['form_stage']); ?></td><td><?php echo esc_html($row['last_activity_at']); ?> UTC</td><td><?php if ($row['order_id']) : ?><a href="<?php echo esc_url($this->order_edit_url($row['order_id'])); ?>">#<?php echo esc_html((string) $row['order_id']); ?></a><?php else : ?>—<?php endif; ?></td><td><a href="<?php echo esc_url(add_query_arg(['page' => 'adoology-incomplete', 'detail' => (int) $row['id']], admin_url('admin.php'))); ?>"><?php esc_html_e('View', 'adoology-connector'); ?></a></td></tr>
+                <tr><td><strong><?php echo esc_html(ucfirst($row['status'])); ?></strong></td><td><?php echo esc_html(str_replace('_', ' ', $row['flow'])); ?></td><td><?php echo esc_html(trim(($customer['name'] ?? '') . ' ' . ($customer['phone'] ?? '')) ?: __('Anonymous', 'adoology-for-woocommerce')); ?></td><td><?php echo esc_html($product ? $product->get_name() : '#' . $row['product_id']); ?> × <?php echo esc_html((string) $row['quantity']); ?></td><td><?php echo wp_kses_post(wc_price(((int) $row['value_minor']) / 10 ** wc_get_price_decimals(), ['currency' => $row['currency']])); ?></td><td><?php echo esc_html($row['form_stage']); ?></td><td><?php echo esc_html($row['last_activity_at']); ?> UTC</td><td><?php if ($row['order_id']) : ?><a href="<?php echo esc_url($this->order_edit_url($row['order_id'])); ?>">#<?php echo esc_html((string) $row['order_id']); ?></a><?php else : ?>—<?php endif; ?></td><td><a href="<?php echo esc_url(add_query_arg(['page' => 'adoology-incomplete', 'detail' => (int) $row['id']], admin_url('admin.php'))); ?>"><?php esc_html_e('View', 'adoology-for-woocommerce'); ?></a></td></tr>
             <?php endforeach; ?></tbody></table>
         </div>
         <?php
@@ -519,7 +539,7 @@ class Settings
         $incomplete_table = Database::incomplete_table();
         $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$incomplete_table} WHERE id = %d", $id), ARRAY_A);
         if (!$row) {
-            echo '<div class="wrap"><h1>' . esc_html__('Incomplete Orders', 'adoology-connector') . '</h1><div class="notice notice-error inline"><p>' . esc_html__('Record not found.', 'adoology-connector') . '</p></div><p><a class="button" href="' . esc_url(admin_url('admin.php?page=adoology-incomplete')) . '">' . esc_html__('Back to list', 'adoology-connector') . '</a></p></div>';
+            echo '<div class="wrap"><h1>' . esc_html__('Incomplete Orders', 'adoology-for-woocommerce') . '</h1><div class="notice notice-error inline"><p>' . esc_html__('Record not found.', 'adoology-for-woocommerce') . '</p></div><p><a class="button" href="' . esc_url(admin_url('admin.php?page=adoology-incomplete')) . '">' . esc_html__('Back to list', 'adoology-for-woocommerce') . '</a></p></div>';
 
             return;
         }
@@ -527,33 +547,33 @@ class Settings
         $customer = $this->checkout_customer($row);
         $product = wc_get_product((int) ($row['variation_id'] ?: $row['product_id']));
         $fields = [
-            __('Status', 'adoology-connector') => esc_html(ucfirst($row['status'])),
-            __('Flow', 'adoology-connector') => esc_html(str_replace('_', ' ', $row['flow'])),
-            __('Checkout ID', 'adoology-connector') => esc_html($row['checkout_id']),
-            __('Stage', 'adoology-connector') => esc_html($row['form_stage']),
-            __('Name', 'adoology-connector') => esc_html(($customer['name'] ?? '') ?: __('Anonymous', 'adoology-connector')),
-            __('Phone', 'adoology-connector') => esc_html((string) ($customer['phone'] ?? '')),
-            __('Email', 'adoology-connector') => esc_html((string) ($customer['email'] ?? '')),
-            __('Address', 'adoology-connector') => esc_html(trim(($customer['address'] ?? '') . ' ' . ($customer['city'] ?? '') . ' ' . ($customer['postcode'] ?? '') . ' ' . ($customer['country'] ?? ''))),
-            __('Product', 'adoology-connector') => esc_html(($product ? $product->get_name() : '#' . $row['product_id']) . ' × ' . $row['quantity']),
-            __('Value', 'adoology-connector') => wp_kses_post(wc_price(((int) $row['value_minor']) / 10 ** wc_get_price_decimals(), ['currency' => $row['currency']])),
-            __('Landing page', 'adoology-connector') => esc_url((string) $row['landing_page']),
-            __('Last activity', 'adoology-connector') => esc_html($row['last_activity_at']) . ' UTC',
-            __('Created', 'adoology-connector') => esc_html($row['created_at']) . ' UTC',
-            __('Expires', 'adoology-connector') => esc_html($row['expires_at']) . ' UTC',
+            __('Status', 'adoology-for-woocommerce') => esc_html(ucfirst($row['status'])),
+            __('Flow', 'adoology-for-woocommerce') => esc_html(str_replace('_', ' ', $row['flow'])),
+            __('Checkout ID', 'adoology-for-woocommerce') => esc_html($row['checkout_id']),
+            __('Stage', 'adoology-for-woocommerce') => esc_html($row['form_stage']),
+            __('Name', 'adoology-for-woocommerce') => esc_html(($customer['name'] ?? '') ?: __('Anonymous', 'adoology-for-woocommerce')),
+            __('Phone', 'adoology-for-woocommerce') => esc_html((string) ($customer['phone'] ?? '')),
+            __('Email', 'adoology-for-woocommerce') => esc_html((string) ($customer['email'] ?? '')),
+            __('Address', 'adoology-for-woocommerce') => esc_html(trim(($customer['address'] ?? '') . ' ' . ($customer['city'] ?? '') . ' ' . ($customer['postcode'] ?? '') . ' ' . ($customer['country'] ?? ''))),
+            __('Product', 'adoology-for-woocommerce') => esc_html(($product ? $product->get_name() : '#' . $row['product_id']) . ' × ' . $row['quantity']),
+            __('Value', 'adoology-for-woocommerce') => wp_kses_post(wc_price(((int) $row['value_minor']) / 10 ** wc_get_price_decimals(), ['currency' => $row['currency']])),
+            __('Landing page', 'adoology-for-woocommerce') => esc_url((string) $row['landing_page']),
+            __('Last activity', 'adoology-for-woocommerce') => esc_html($row['last_activity_at']) . ' UTC',
+            __('Created', 'adoology-for-woocommerce') => esc_html($row['created_at']) . ' UTC',
+            __('Expires', 'adoology-for-woocommerce') => esc_html($row['expires_at']) . ' UTC',
         ];
         ?>
-        <div class="wrap"><h1><?php esc_html_e('Incomplete Order', 'adoology-connector'); ?></h1>
-            <p><?php esc_html_e('Read-only snapshot. Contact, recovery, and order creation are managed in Adoology.', 'adoology-connector'); ?></p>
+        <div class="wrap"><h1><?php esc_html_e('Incomplete Order', 'adoology-for-woocommerce'); ?></h1>
+            <p><?php esc_html_e('Read-only snapshot. Contact, recovery, and order creation are managed in Adoology.', 'adoology-for-woocommerce'); ?></p>
             <table class="form-table" role="presentation">
                 <?php foreach ($fields as $label => $value) : ?>
                     <tr><th scope="row"><?php echo esc_html($label); ?></th><td><?php echo $value; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- each field value is escaped above.?></td></tr>
                 <?php endforeach; ?>
                 <?php if ((int) $row['order_id'] > 0) : ?>
-                    <tr><th scope="row"><?php esc_html_e('Order', 'adoology-connector'); ?></th><td><a href="<?php echo esc_url($this->order_edit_url($row['order_id'])); ?>">#<?php echo esc_html((string) $row['order_id']); ?></a></td></tr>
+                    <tr><th scope="row"><?php esc_html_e('Order', 'adoology-for-woocommerce'); ?></th><td><a href="<?php echo esc_url($this->order_edit_url($row['order_id'])); ?>">#<?php echo esc_html((string) $row['order_id']); ?></a></td></tr>
                 <?php endif; ?>
             </table>
-            <p><a class="button" href="<?php echo esc_url(admin_url('admin.php?page=adoology-incomplete')); ?>"><?php esc_html_e('Back to list', 'adoology-connector'); ?></a></p>
+            <p><a class="button" href="<?php echo esc_url(admin_url('admin.php?page=adoology-incomplete')); ?>"><?php esc_html_e('Back to list', 'adoology-for-woocommerce'); ?></a></p>
         </div>
         <?php
     }
@@ -572,17 +592,17 @@ class Settings
             'meta_query' => [['key' => '_adoology_risk_score', 'value' => $threshold, 'compare' => '>=', 'type' => 'NUMERIC']],
         ]);
         ?>
-        <div class="wrap"><h1><?php esc_html_e('Fraud Protection', 'adoology-connector'); ?></h1>
-            <p><?php esc_html_e('Signals use direct IP velocity, duplicate contacts/products, invalid contact data, suspicious user agents, and a server-side honeypot. Orders from a contact that already ordered within the hard-block window are rejected outright.', 'adoology-connector'); ?></p>
-            <p><strong><?php esc_html_e('Actions:', 'adoology-connector'); ?></strong> <?php printf(
+        <div class="wrap"><h1><?php esc_html_e('Fraud Protection', 'adoology-for-woocommerce'); ?></h1>
+            <p><?php esc_html_e('Signals use direct IP velocity, duplicate contacts/products, invalid contact data, suspicious user agents, and a server-side honeypot. Orders from a contact that already ordered within the hard-block window are rejected outright.', 'adoology-for-woocommerce'); ?></p>
+            <p><strong><?php esc_html_e('Actions:', 'adoology-for-woocommerce'); ?></strong> <?php printf(
                 /* translators: 1: flag threshold, 2: hold threshold, 3: block threshold. */
-                esc_html__('Flag at %1$d, hold at %2$d, block at %3$d.', 'adoology-connector'),
+                esc_html__('Flag at %1$d, hold at %2$d, block at %3$d.', 'adoology-for-woocommerce'),
                 absint($threshold),
                 absint((int) Options::get('adoology_fraud_hold_threshold', 60)),
                 absint((int) Options::get('adoology_fraud_block_threshold', 90))
             ); ?></p>
-            <table class="widefat striped"><thead><tr><th><?php esc_html_e('Order', 'adoology-connector'); ?></th><th><?php esc_html_e('Score', 'adoology-connector'); ?></th><th><?php esc_html_e('Action', 'adoology-connector'); ?></th><th><?php esc_html_e('Signals', 'adoology-connector'); ?></th><th><?php esc_html_e('Status', 'adoology-connector'); ?></th></tr></thead><tbody>
-            <?php if (!$orders) : ?><tr><td colspan="5"><?php esc_html_e('No flagged orders.', 'adoology-connector'); ?></td></tr><?php endif; ?>
+            <table class="widefat striped"><thead><tr><th><?php esc_html_e('Order', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Score', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Action', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Signals', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Status', 'adoology-for-woocommerce'); ?></th></tr></thead><tbody>
+            <?php if (!$orders) : ?><tr><td colspan="5"><?php esc_html_e('No flagged orders.', 'adoology-for-woocommerce'); ?></td></tr><?php endif; ?>
             <?php foreach ($orders as $order) : ?><tr><td><a href="<?php echo esc_url($this->order_edit_url($order->get_id())); ?>">#<?php echo esc_html((string) $order->get_id()); ?></a></td><td><?php echo esc_html((string) $order->get_meta('_adoology_risk_score', true)); ?>/100</td><td><?php echo esc_html((string) $order->get_meta('_adoology_risk_action', true)); ?></td><td><?php echo esc_html(implode(', ', (array) json_decode((string) $order->get_meta('_adoology_risk_signals', true), true))); ?></td><td><?php echo esc_html(wc_get_order_status_name($order->get_status())); ?></td></tr><?php endforeach; ?>
             </tbody></table>
         </div>
@@ -596,11 +616,11 @@ class Settings
     {
         $this->guard_page();
         ?>
-        <div class="wrap"><h1><?php esc_html_e('Adoology Order Form', 'adoology-connector'); ?></h1>
-            <p><?php esc_html_e('Creates a normal WooCommerce order without requiring the WooCommerce cart. Payment gateways continue through WooCommerce order-pay pages.', 'adoology-connector'); ?></p>
-            <h2><?php esc_html_e('Shortcode', 'adoology-connector'); ?></h2><p><code>[adoology_order_form product_id="123"]</code></p>
+        <div class="wrap"><h1><?php esc_html_e('Adoology Order Form', 'adoology-for-woocommerce'); ?></h1>
+            <p><?php esc_html_e('Creates a normal WooCommerce order without requiring the WooCommerce cart. Payment gateways continue through WooCommerce order-pay pages.', 'adoology-for-woocommerce'); ?></p>
+            <h2><?php esc_html_e('Shortcode', 'adoology-for-woocommerce'); ?></h2><p><code>[adoology_order_form product_id="123"]</code></p>
             <p><code>[adoology_order_form product_id="123" title="Order today" delivery_options="standard:Standard Delivery,pickup:Pickup"]</code></p>
-            <h2><?php esc_html_e('Block', 'adoology-connector'); ?></h2><p><?php esc_html_e('Add the “Adoology Order Form” block and enter a WooCommerce product ID in its sidebar.', 'adoology-connector'); ?></p>
+            <h2><?php esc_html_e('Block', 'adoology-for-woocommerce'); ?></h2><p><?php esc_html_e('Add the “Adoology Order Form” block and enter a WooCommerce product ID in its sidebar.', 'adoology-for-woocommerce'); ?></p>
         </div>
         <?php
     }
@@ -612,21 +632,21 @@ class Settings
     {
         $this->guard_page();
         ?>
-        <div class="wrap"><h1><?php esc_html_e('Adoology Settings', 'adoology-connector'); ?></h1><?php settings_errors(); ?>
-            <p><?php esc_html_e('Enable incomplete-order tracking only after updating the store privacy policy and obtaining any consent required in your jurisdiction.', 'adoology-connector'); ?></p>
+        <div class="wrap"><h1><?php esc_html_e('Adoology Settings', 'adoology-for-woocommerce'); ?></h1><?php settings_errors(); ?>
+            <p><?php esc_html_e('Enable incomplete-order tracking only after updating the store privacy policy and obtaining any consent required in your jurisdiction.', 'adoology-for-woocommerce'); ?></p>
             <form method="post" action="options.php"><?php settings_fields('adoology_features'); ?>
                 <table class="form-table" role="presentation">
-                    <?php $this->checkbox_row('adoology_tracking_enabled', __('Incomplete-order tracking', 'adoology-connector')); ?>
-                    <?php $this->number_row('adoology_incomplete_timeout_minutes', __('Mark incomplete after (minutes)', 'adoology-connector'), 5, 1440); ?>
-                    <?php $this->number_row('adoology_incomplete_expire_days', __('Expire data after (days)', 'adoology-connector'), 1, 90); ?>
-                    <?php $this->checkbox_row('adoology_fraud_enabled', __('Fraud and bot protection', 'adoology-connector')); ?>
-                    <?php $this->number_row('adoology_fraud_rate_limit', __('Order attempts per 10 minutes', 'adoology-connector'), 2, 100); ?>
-                    <?php $this->number_row('adoology_duplicate_window_minutes', __('Duplicate-order window (minutes)', 'adoology-connector'), 5, 1440); ?>
-                    <?php $this->number_row('adoology_duplicate_block_minutes', __('Duplicate-order hard block (minutes, 0 disables)', 'adoology-connector'), 0, 1440); ?>
-                    <?php $this->number_row('adoology_fraud_flag_threshold', __('Flag threshold', 'adoology-connector'), 1, 100); ?>
-                    <?php $this->number_row('adoology_fraud_hold_threshold', __('Hold threshold', 'adoology-connector'), 1, 100); ?>
-                    <?php $this->number_row('adoology_fraud_block_threshold', __('Block threshold', 'adoology-connector'), 1, 100); ?>
-                    <?php $this->checkbox_row('adoology_order_form_enabled', __('Landing-page order form', 'adoology-connector')); ?>
+                    <?php $this->checkbox_row('adoology_tracking_enabled', __('Incomplete-order tracking', 'adoology-for-woocommerce')); ?>
+                    <?php $this->number_row('adoology_incomplete_timeout_minutes', __('Mark incomplete after (minutes)', 'adoology-for-woocommerce'), 5, 1440); ?>
+                    <?php $this->number_row('adoology_incomplete_expire_days', __('Expire data after (days)', 'adoology-for-woocommerce'), 1, 90); ?>
+                    <?php $this->checkbox_row('adoology_fraud_enabled', __('Fraud and bot protection', 'adoology-for-woocommerce')); ?>
+                    <?php $this->number_row('adoology_fraud_rate_limit', __('Order attempts per 10 minutes', 'adoology-for-woocommerce'), 2, 100); ?>
+                    <?php $this->number_row('adoology_duplicate_window_minutes', __('Duplicate-order window (minutes)', 'adoology-for-woocommerce'), 5, 1440); ?>
+                    <?php $this->number_row('adoology_duplicate_block_minutes', __('Duplicate-order hard block (minutes, 0 disables)', 'adoology-for-woocommerce'), 0, 1440); ?>
+                    <?php $this->number_row('adoology_fraud_flag_threshold', __('Flag threshold', 'adoology-for-woocommerce'), 1, 100); ?>
+                    <?php $this->number_row('adoology_fraud_hold_threshold', __('Hold threshold', 'adoology-for-woocommerce'), 1, 100); ?>
+                    <?php $this->number_row('adoology_fraud_block_threshold', __('Block threshold', 'adoology-for-woocommerce'), 1, 100); ?>
+                    <?php $this->checkbox_row('adoology_order_form_enabled', __('Landing-page order form', 'adoology-for-woocommerce')); ?>
                 </table><?php submit_button(); ?>
             </form>
         </div>
@@ -644,11 +664,10 @@ class Settings
         $events_table = Database::events_table();
         $rows = $wpdb->get_results("SELECT event_id, event_name, status, attempts, last_error, created_at, sent_at FROM {$events_table} ORDER BY id DESC LIMIT 100", ARRAY_A);
         ?>
-        <div class="wrap"><h1><?php esc_html_e('Adoology Logs', 'adoology-connector'); ?></h1><?php $this->render_action_notice(); ?>
-            <?php $this->admin_styles(); ?>
-            <form class="adoology-log-actions" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>"><?php wp_nonce_field('adoology_retry_events'); ?><input type="hidden" name="action" value="adoology_retry_events" /><?php submit_button(__('Retry Failed Events', 'adoology-connector'), 'secondary', 'submit', false); ?></form>
-            <table class="widefat striped"><thead><tr><th><?php esc_html_e('Event', 'adoology-connector'); ?></th><th><?php esc_html_e('Status', 'adoology-connector'); ?></th><th><?php esc_html_e('Attempts', 'adoology-connector'); ?></th><th><?php esc_html_e('Error', 'adoology-connector'); ?></th><th><?php esc_html_e('Created', 'adoology-connector'); ?></th><th><?php esc_html_e('Sent', 'adoology-connector'); ?></th></tr></thead><tbody>
-            <?php if (!$rows) : ?><tr><td colspan="6"><?php esc_html_e('No event deliveries.', 'adoology-connector'); ?></td></tr><?php endif; ?>
+        <div class="wrap"><h1><?php esc_html_e('Adoology Logs', 'adoology-for-woocommerce'); ?></h1><?php $this->render_action_notice(); ?>
+            <form class="adoology-log-actions" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>"><?php wp_nonce_field('adoology_retry_events'); ?><input type="hidden" name="action" value="adoology_retry_events" /><?php submit_button(__('Retry Failed Events', 'adoology-for-woocommerce'), 'secondary', 'submit', false); ?></form>
+            <table class="widefat striped"><thead><tr><th><?php esc_html_e('Event', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Status', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Attempts', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Error', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Created', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Sent', 'adoology-for-woocommerce'); ?></th></tr></thead><tbody>
+            <?php if (!$rows) : ?><tr><td colspan="6"><?php esc_html_e('No event deliveries.', 'adoology-for-woocommerce'); ?></td></tr><?php endif; ?>
             <?php foreach ($rows as $row) : ?><tr><td><code><?php echo esc_html($row['event_name']); ?></code><br><small><?php echo esc_html($row['event_id']); ?></small></td><td><?php echo esc_html($row['status']); ?></td><td><?php echo esc_html((string) $row['attempts']); ?></td><td><?php echo esc_html((string) $row['last_error']); ?></td><td><?php echo esc_html($row['created_at']); ?> UTC</td><td><?php echo esc_html((string) $row['sent_at']); ?></td></tr><?php endforeach; ?>
             </tbody></table>
         </div>
@@ -658,7 +677,7 @@ class Settings
     private function guard_page()
     {
         if (!current_user_can('manage_woocommerce')) {
-            wp_die(esc_html__('You do not have permission to manage Adoology.', 'adoology-connector'));
+            wp_die(esc_html__('You do not have permission to manage Adoology.', 'adoology-for-woocommerce'));
         }
     }
 
@@ -695,17 +714,12 @@ class Settings
     private function checkbox_row($option, $label)
     {
         $default = $option === 'adoology_tracking_enabled' ? 'no' : 'yes';
-        ?><tr><th scope="row"><?php echo esc_html($label); ?></th><td><label><input type="checkbox" name="<?php echo esc_attr($option); ?>" value="yes" <?php checked(Options::get($option, $default), 'yes'); ?> /> <?php esc_html_e('Enabled', 'adoology-connector'); ?></label></td></tr><?php
+        ?><tr><th scope="row"><?php echo esc_html($label); ?></th><td><label><input type="checkbox" name="<?php echo esc_attr($option); ?>" value="yes" <?php checked(Options::get($option, $default), 'yes'); ?> /> <?php esc_html_e('Enabled', 'adoology-for-woocommerce'); ?></label></td></tr><?php
     }
 
     private function number_row($option, $label, $min, $max)
     {
         ?><tr><th scope="row"><label for="<?php echo esc_attr($option); ?>"><?php echo esc_html($label); ?></label></th><td><input type="number" class="small-text" id="<?php echo esc_attr($option); ?>" name="<?php echo esc_attr($option); ?>" value="<?php echo esc_attr((string) Options::get($option, $min)); ?>" min="<?php echo esc_attr((string) $min); ?>" max="<?php echo esc_attr((string) $max); ?>" /></td></tr><?php
-    }
-
-    private function admin_styles()
-    {
-        ?><style>.adoology-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;max-width:1100px;margin:20px 0}.adoology-card{padding:18px;border:1px solid #dcdcde;border-radius:10px;background:#fff}.adoology-card span{display:block;color:#646970;margin-bottom:12px}.adoology-card strong{display:block;font-size:24px;line-height:1.2}.adoology-log-actions{margin-bottom:16px}</style><?php
     }
 
     /**
@@ -715,10 +729,10 @@ class Settings
      */
     private function authorize_action($action)
     {
-        $nonce = sanitize_text_field(wp_unslash($_POST['_wpnonce'] ?? ''));
-        if (!current_user_can('manage_woocommerce') || !wp_verify_nonce($nonce, $action)) {
-            wp_die(esc_html__('Security check failed.', 'adoology-connector'));
+        if (!current_user_can('manage_woocommerce') || ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            wp_die(esc_html__('Security check failed.', 'adoology-for-woocommerce'));
         }
+        check_admin_referer($action);
     }
 
     /**
@@ -751,11 +765,11 @@ class Settings
     private function render_action_notice()
     {
         $actions = [
-            'adoology_connect' => __('Store connection checked.', 'adoology-connector'),
-            'adoology_test' => __('Adoology connection is reachable.', 'adoology-connector'),
-            'adoology_disconnect' => __('Store disconnected from Adoology.', 'adoology-connector'),
-            'adoology_sync' => __('Product synchronization started.', 'adoology-connector'),
-            'adoology_retry' => __('Failed events queued for retry.', 'adoology-connector'),
+            'adoology_connect' => __('Store connection checked.', 'adoology-for-woocommerce'),
+            'adoology_test' => __('Adoology connection is reachable.', 'adoology-for-woocommerce'),
+            'adoology_disconnect' => __('Store disconnected from Adoology.', 'adoology-for-woocommerce'),
+            'adoology_sync' => __('Product synchronization started.', 'adoology-for-woocommerce'),
+            'adoology_retry' => __('Failed events queued for retry.', 'adoology-for-woocommerce'),
         ];
         $transient = 'adoology_admin_notice_' . get_current_user_id();
         $notice = get_transient($transient);

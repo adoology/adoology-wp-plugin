@@ -94,7 +94,7 @@ class Connection
     public static function connect()
     {
         if (!Crypto::is_available()) {
-            return self::fail(new WP_Error('adoology_crypto_unavailable', __('OpenSSL AES-256-GCM support is required before connecting.', 'adoology-connector')));
+            return self::fail(new WP_Error('adoology_crypto_unavailable', __('OpenSSL AES-256-GCM support is required before connecting.', 'adoology-for-woocommerce')));
         }
 
         $token = ApiClient::token();
@@ -102,7 +102,7 @@ class Connection
             return self::fail($token);
         }
         if (!ApiClient::is_valid_token($token)) {
-            return self::fail(new WP_Error('adoology_no_token', __('Save a valid Adoology workspace API key before connecting.', 'adoology-connector')));
+            return self::fail(new WP_Error('adoology_no_token', __('Save a valid Adoology workspace API key before connecting.', 'adoology-for-woocommerce')));
         }
 
         $local_connection_id = self::connection_id();
@@ -142,15 +142,15 @@ class Connection
         $webhook_secret = isset($created['meta']['webhook_secret']) ? (string) $created['meta']['webhook_secret'] : '';
         $existing = isset($created['meta']['existing']) && $created['meta']['existing'] === true;
         if (!self::is_valid_connection_id($connection_id)) {
-            return self::fail(new WP_Error('adoology_bad_connection_response', __('Adoology returned an invalid connection identifier.', 'adoology-connector')));
+            return self::fail(new WP_Error('adoology_bad_connection_response', __('Adoology returned an invalid connection identifier.', 'adoology-for-woocommerce')));
         }
         if ($local_connection_id !== '' && !hash_equals(strtoupper($local_connection_id), strtoupper($connection_id))) {
-            return self::fail(new WP_Error('adoology_connection_mismatch', __('Adoology returned a different store connection while repairing credentials.', 'adoology-connector')));
+            return self::fail(new WP_Error('adoology_connection_mismatch', __('Adoology returned a different store connection while repairing credentials.', 'adoology-for-woocommerce')));
         }
 
         if ($existing && $redirect_url === '') {
             if (!preg_match('/^[a-f0-9]{64}$/Di', $webhook_secret)) {
-                return self::fail(new WP_Error('adoology_repair_unavailable', __('Adoology could not restore the local webhook credential. Try again after updating the Adoology service.', 'adoology-connector')));
+                return self::fail(new WP_Error('adoology_repair_unavailable', __('Adoology could not restore the local webhook credential. Try again after updating the Adoology service.', 'adoology-for-woocommerce')));
             }
             $stored_secret = Crypto::set_secret('adoology_webhook_secret', $webhook_secret);
             if (is_wp_error($stored_secret)) {
@@ -169,7 +169,7 @@ class Connection
                 Options::delete('adoology_create_idempotency_key');
             }
 
-            return self::fail(new WP_Error('adoology_bad_authorization_url', __('Adoology returned an invalid WooCommerce authorization URL.', 'adoology-connector')));
+            return self::fail(new WP_Error('adoology_bad_authorization_url', __('Adoology returned an invalid WooCommerce authorization URL.', 'adoology-for-woocommerce')));
         }
 
         $stored_secret = Crypto::set_secret('adoology_webhook_secret', $webhook_secret);
@@ -266,7 +266,7 @@ class Connection
     {
         $connection_id = self::connection_id();
         if ($connection_id === '') {
-            return self::fail(new WP_Error('adoology_not_connected', __('Connect the store before checking its status.', 'adoology-connector')));
+            return self::fail(new WP_Error('adoology_not_connected', __('Connect the store before checking its status.', 'adoology-for-woocommerce')));
         }
 
         $result = ApiClient::get_connection($connection_id);
@@ -586,7 +586,7 @@ class Connection
      */
     private static function fail($error)
     {
-        $message = is_wp_error($error) ? $error->get_error_message() : __('Unknown Adoology connection error.', 'adoology-connector');
+        $message = is_wp_error($error) ? $error->get_error_message() : __('Unknown Adoology connection error.', 'adoology-for-woocommerce');
         Options::update('adoology_last_error', [
             'message' => Logger::redact_string(sanitize_text_field($message)),
             'time' => gmdate('Y-m-d H:i:s'),

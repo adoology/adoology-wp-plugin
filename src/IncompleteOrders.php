@@ -163,14 +163,14 @@ class IncompleteOrders
     public static function capture($request)
     {
         if (Options::get('adoology_tracking_enabled', 'no') !== 'yes') {
-            return new WP_Error('adoology_tracking_disabled', __('Checkout tracking is disabled.', 'adoology-connector'), ['status' => 403]);
+            return new WP_Error('adoology_tracking_disabled', __('Checkout tracking is disabled.', 'adoology-for-woocommerce'), ['status' => 403]);
         }
         if (!self::is_same_origin($request)) {
-            return new WP_Error('adoology_capture_forbidden', __('Checkout capture request was rejected.', 'adoology-connector'), ['status' => 403]);
+            return new WP_Error('adoology_capture_forbidden', __('Checkout capture request was rejected.', 'adoology-for-woocommerce'), ['status' => 403]);
         }
         $params = $request->get_json_params();
         if (!is_array($params)) {
-            return new WP_Error('adoology_capture_invalid', __('Invalid checkout data.', 'adoology-connector'), ['status' => 400]);
+            return new WP_Error('adoology_capture_invalid', __('Invalid checkout data.', 'adoology-for-woocommerce'), ['status' => 400]);
         }
         $checkout_id = isset($params['checkout_id']) ? sanitize_text_field($params['checkout_id']) : '';
         $anonymous_id = isset($params['anonymous_id']) ? sanitize_text_field($params['anonymous_id']) : '';
@@ -181,10 +181,10 @@ class IncompleteOrders
         $context = self::verify_capture_context($encoded_context, $context_signature);
         if (!is_array($context) || !self::is_uuid($checkout_id) || !self::is_uuid($anonymous_id) || !self::is_uuid($session_id) ||
             !self::verify_capture_token($capture_token, $anonymous_id, $checkout_id, $session_id, $encoded_context)) {
-            return new WP_Error('adoology_capture_invalid', __('Invalid checkout identity.', 'adoology-connector'), ['status' => 400]);
+            return new WP_Error('adoology_capture_invalid', __('Invalid checkout identity.', 'adoology-for-woocommerce'), ['status' => 400]);
         }
         if (!self::allow_capture_request($anonymous_id)) {
-            return new WP_Error('adoology_capture_limited', __('Too many checkout updates.', 'adoology-connector'), ['status' => 429]);
+            return new WP_Error('adoology_capture_limited', __('Too many checkout updates.', 'adoology-for-woocommerce'), ['status' => 429]);
         }
 
         $trusted = self::trusted_capture_data($context, $params);
@@ -233,7 +233,7 @@ class IncompleteOrders
         $enabled = Options::get('adoology_tracking_enabled', 'no') === 'yes';
         self::load_woocommerce_cart();
         if (!$enabled || !is_array($context) || !self::is_same_origin($request) || !self::allow_capture_request('token:' . self::client_ip())) {
-            return new WP_Error('adoology_capture_forbidden', __('Checkout capture request was rejected.', 'adoology-connector'), ['status' => 403]);
+            return new WP_Error('adoology_capture_forbidden', __('Checkout capture request was rejected.', 'adoology-for-woocommerce'), ['status' => 403]);
         }
         $identity = $context['flow'] === 'checkout' ? self::identity(true) : self::identity_for_flow();
         $anonymous_id = $identity['anonymous_id'];
@@ -267,7 +267,7 @@ class IncompleteOrders
             self::load_woocommerce_cart();
             $cart = function_exists('WC') && WC()->cart ? WC()->cart : null;
             if (!$cart) {
-                return new WP_Error('adoology_capture_cart_missing', __('Checkout cart is unavailable.', 'adoology-connector'), ['status' => 400]);
+                return new WP_Error('adoology_capture_cart_missing', __('Checkout cart is unavailable.', 'adoology-for-woocommerce'), ['status' => 400]);
             }
             $items = [];
             foreach ($cart->get_cart() as $item) {
@@ -295,7 +295,7 @@ class IncompleteOrders
         $quantity = max(1, min(99, (int) ($params['quantity'] ?? 1)));
         $product = wc_get_product($variation_id ?: $product_id);
         if (!$product || !$product->is_purchasable() || ($variation_id && (int) $product->get_parent_id() !== $product_id)) {
-            return new WP_Error('adoology_capture_product_invalid', __('Selected product is unavailable.', 'adoology-connector'), ['status' => 400]);
+            return new WP_Error('adoology_capture_product_invalid', __('Selected product is unavailable.', 'adoology-for-woocommerce'), ['status' => 400]);
         }
 
         return [
@@ -376,7 +376,7 @@ class IncompleteOrders
         global $wpdb;
 
         if (!self::is_uuid($checkout_id)) {
-            return new WP_Error('adoology_checkout_invalid', __('Invalid checkout identifier.', 'adoology-connector'));
+            return new WP_Error('adoology_checkout_invalid', __('Invalid checkout identifier.', 'adoology-for-woocommerce'));
         }
 
         $table = Database::incomplete_table();
@@ -460,7 +460,7 @@ class IncompleteOrders
                 $row['form_stage'] = $existing['form_stage'];
             }
             if ($wpdb->update($table, $row, ['id' => (int) $existing['id']]) === false) {
-                return new WP_Error('adoology_checkout_store_failed', __('Could not store incomplete checkout.', 'adoology-connector'));
+                return new WP_Error('adoology_checkout_store_failed', __('Could not store incomplete checkout.', 'adoology-for-woocommerce'));
             }
             $changed = self::public_customer($previous) !== self::public_customer($customer) || ($previous['items'] ?? []) !== ($customer['items'] ?? []);
             foreach (['form_stage', 'product_id', 'variation_id', 'quantity', 'value_minor', 'currency', 'flow'] as $field) {
@@ -487,7 +487,7 @@ class IncompleteOrders
         $row['created_at'] = $now;
         $inserted = $wpdb->insert($table, $row);
         if (!$inserted) {
-            return new WP_Error('adoology_checkout_store_failed', __('Could not store incomplete checkout.', 'adoology-connector'));
+            return new WP_Error('adoology_checkout_store_failed', __('Could not store incomplete checkout.', 'adoology-for-woocommerce'));
         }
 
         if ($tracking) {
@@ -782,12 +782,12 @@ class IncompleteOrders
         global $wpdb;
 
         if (!self::is_uuid($checkout_id)) {
-            return new WP_Error('adoology_checkout_invalid', __('Invalid checkout identifier.', 'adoology-connector'));
+            return new WP_Error('adoology_checkout_invalid', __('Invalid checkout identifier.', 'adoology-for-woocommerce'));
         }
         // Serialize captures and completion even after the snapshot row is deleted.
         $lock = 'ado_checkout_' . substr(hash('sha256', $wpdb->prefix . $checkout_id), 0, 48);
         if ((int) $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, 5)', $lock)) !== 1) {
-            return new WP_Error('adoology_checkout_busy', __('Checkout is being updated. Please try again.', 'adoology-connector'), ['status' => 409]);
+            return new WP_Error('adoology_checkout_busy', __('Checkout is being updated. Please try again.', 'adoology-for-woocommerce'), ['status' => 409]);
         }
         try {
             return $callback();
@@ -942,18 +942,18 @@ class IncompleteOrders
         $table = Database::incomplete_table();
         $row = $wpdb->get_row($wpdb->prepare("SELECT id, status, order_id FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
         if (!$row) {
-            return new WP_Error('adoology_checkout_missing', __('Checkout could not be prepared.', 'adoology-connector'));
+            return new WP_Error('adoology_checkout_missing', __('Checkout could not be prepared.', 'adoology-for-woocommerce'));
         }
         if (in_array($row['status'], ['converted', 'recovered'], true) && (int) $row['order_id'] > 0) {
             return ['claimed' => false, 'order_id' => (int) $row['order_id']];
         }
         if (!in_array($row['status'], ['started', 'incomplete'], true)) {
-            return new WP_Error('adoology_checkout_processing', __('This order submission is already being processed.', 'adoology-connector'));
+            return new WP_Error('adoology_checkout_processing', __('This order submission is already being processed.', 'adoology-for-woocommerce'));
         }
         $next = $row['status'] === 'incomplete' ? 'submitting_recovery' : 'submitting';
         $updated = $wpdb->update($table, ['status' => $next, 'updated_at' => gmdate('Y-m-d H:i:s')], ['id' => (int) $row['id'], 'status' => $row['status']]);
 
-        return $updated ? ['claimed' => true, 'order_id' => 0] : new WP_Error('adoology_checkout_processing', __('This order submission is already being processed.', 'adoology-connector'));
+        return $updated ? ['claimed' => true, 'order_id' => 0] : new WP_Error('adoology_checkout_processing', __('This order submission is already being processed.', 'adoology-for-woocommerce'));
     }
 
     /**
@@ -1208,7 +1208,7 @@ class IncompleteOrders
     public static function register_exporter($exporters)
     {
         $exporters['adoology-incomplete-orders'] = [
-            'exporter_friendly_name' => __('Adoology incomplete orders', 'adoology-connector'),
+            'exporter_friendly_name' => __('Adoology incomplete orders', 'adoology-for-woocommerce'),
             'callback' => [self::class, 'export_personal_data'],
         ];
 
@@ -1224,7 +1224,7 @@ class IncompleteOrders
     public static function register_eraser($erasers)
     {
         $erasers['adoology-incomplete-orders'] = [
-            'eraser_friendly_name' => __('Adoology incomplete orders', 'adoology-connector'),
+            'eraser_friendly_name' => __('Adoology incomplete orders', 'adoology-for-woocommerce'),
             'callback' => [self::class, 'erase_personal_data'],
         ];
 
@@ -1240,8 +1240,8 @@ class IncompleteOrders
             return;
         }
         wp_add_privacy_policy_content(
-            __('Adoology for WooCommerce', 'adoology-connector'),
-            wp_kses_post(__('<p>When incomplete-order tracking is enabled, this store temporarily records checkout contact, address, product, session, IP address, and browser information. Data is encrypted locally, sent to the connected Adoology workspace for order recovery and risk analysis, and removed according to the configured retention period.</p>', 'adoology-connector'))
+            __('Adoology for WooCommerce', 'adoology-for-woocommerce'),
+            wp_kses_post(__('<p>After this store connects to Adoology and authorizes WooCommerce API access, products, inventory, customer details, and orders are synchronized with Adoology. When incomplete-order tracking is enabled, checkout contact, address, product, session, IP address, and browser information is encrypted locally and sent to the connected workspace for order recovery. Fraud protection also sends order/product identifiers, risk scores and signals, IP addresses, browser information, and anonymous/session identifiers when enabled, even if incomplete-order tracking is disabled. Local data follows the configured retention period; data already delivered to Adoology must be erased from the workspace separately.</p>', 'adoology-for-woocommerce'))
         );
     }
 
@@ -1265,11 +1265,11 @@ class IncompleteOrders
                 $fields[] = ['name' => ucfirst(str_replace('_', ' ', $field)), 'value' => $match['row'][$field]];
             }
             foreach (self::events_for_anonymous($match['customer']['anonymous_id'] ?? '') as $event) {
-                $fields[] = ['name' => __('Adoology event', 'adoology-connector'), 'value' => wp_json_encode($event)];
+                $fields[] = ['name' => __('Adoology event', 'adoology-for-woocommerce'), 'value' => wp_json_encode($event)];
             }
             $data[] = [
                 'group_id' => 'adoology-incomplete-orders',
-                'group_label' => __('Adoology incomplete orders', 'adoology-connector'),
+                'group_label' => __('Adoology incomplete orders', 'adoology-for-woocommerce'),
                 'item_id' => 'adoology-checkout-' . $match['row']['id'],
                 'data' => $fields,
             ];
@@ -1312,7 +1312,7 @@ class IncompleteOrders
         return [
             'items_removed' => $removed,
             'items_retained' => $removed,
-            'messages' => $removed ? [__('Local data was erased. Data already delivered to Adoology must be erased from the connected workspace separately.', 'adoology-connector')] : [],
+            'messages' => $removed ? [__('Local data was erased. Data already delivered to Adoology must be erased from the connected workspace separately.', 'adoology-for-woocommerce')] : [],
             'done' => $matches['done'],
         ];
     }

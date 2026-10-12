@@ -26,6 +26,7 @@ class OrderForm
         add_action('admin_post_nopriv_adoology_submit_order', [self::class, 'submit']);
         add_action('init', [self::class, 'register_block']);
         add_action('enqueue_block_editor_assets', [self::class, 'editor_assets']);
+        add_action('wp_enqueue_scripts', [self::class, 'enqueue_styles']);
     }
 
     /**
@@ -57,6 +58,7 @@ class OrderForm
             ADOOLOGY_VERSION,
             true
         );
+        wp_set_script_translations('adoology-order-form-block', 'adoology-for-woocommerce');
     }
 
     /**
@@ -86,12 +88,12 @@ class OrderForm
         }
         $attributes = shortcode_atts([
             'product_id' => 0,
-            'title' => __('Order now', 'adoology-connector'),
-            'delivery_options' => 'standard:' . __('Standard delivery', 'adoology-connector') . ',pickup:' . __('Pickup', 'adoology-connector'),
+            'title' => __('Order now', 'adoology-for-woocommerce'),
+            'delivery_options' => 'standard:' . __('Standard delivery', 'adoology-for-woocommerce') . ',pickup:' . __('Pickup', 'adoology-for-woocommerce'),
         ], $attributes, 'adoology_order_form');
         $product = wc_get_product((int) $attributes['product_id']);
         if (!$product || !$product->is_purchasable()) {
-            return current_user_can('edit_posts') ? '<p>' . esc_html__('Select a purchasable WooCommerce product for this Adoology order form.', 'adoology-connector') . '</p>' : '';
+            return current_user_can('edit_posts') ? '<p>' . esc_html__('Select a purchasable WooCommerce product for this Adoology order form.', 'adoology-for-woocommerce') . '</p>' : '';
         }
 
         $capture_context = IncompleteOrders::enqueue_tracker('order_form', [
@@ -113,8 +115,8 @@ class OrderForm
         $delivery_signature = hash_hmac('sha256', (int) $product->get_id() . '|' . $delivery_data, wp_salt('nonce'));
         $country = sanitize_key(WC()->countries->get_base_country());
 
+        self::enqueue_styles();
         ob_start();
-        self::styles();
         ?>
         <form class="adoology-order-form" data-adoology-order-form="1" data-adoology-capture-context="<?php echo esc_attr($capture_context['context']); ?>" data-adoology-capture-signature="<?php echo esc_attr($capture_context['signature']); ?>" data-product-id="<?php echo esc_attr((string) $product->get_id()); ?>" data-value-minor="<?php echo esc_attr((string) IncompleteOrders::to_minor($product->get_price())); ?>" data-currency="<?php echo esc_attr(get_woocommerce_currency()); ?>" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
             <input type="hidden" name="action" value="adoology_submit_order" />
@@ -125,7 +127,7 @@ class OrderForm
             <?php wp_nonce_field('adoology_submit_order', '_adoology_nonce'); ?>
             <div class="adoology-form-head">
                 <div>
-                    <span class="adoology-form-kicker"><?php esc_html_e('Secure WooCommerce order', 'adoology-connector'); ?></span>
+                    <span class="adoology-form-kicker"><?php esc_html_e('Secure WooCommerce order', 'adoology-for-woocommerce'); ?></span>
                     <h3><?php echo esc_html($attributes['title']); ?></h3>
                 </div>
                 <strong><?php echo wp_kses_post($product->get_price_html()); ?></strong>
@@ -134,20 +136,20 @@ class OrderForm
                 <div class="adoology-form-error" role="alert"><?php echo esc_html($error); ?></div>
             <?php endif; ?>
             <div class="adoology-form-grid">
-                <p><label><?php esc_html_e('Name', 'adoology-connector'); ?><input name="adoology_name" type="text" maxlength="190" autocomplete="name" required /></label></p>
-                <p><label><?php esc_html_e('Phone', 'adoology-connector'); ?><input name="adoology_phone" type="tel" maxlength="40" autocomplete="tel" required /></label></p>
-                <p><label><?php esc_html_e('Email', 'adoology-connector'); ?><input name="adoology_email" type="email" maxlength="190" autocomplete="email" /></label></p>
-                <p><label><?php esc_html_e('Quantity', 'adoology-connector'); ?><input name="quantity" type="number" value="1" min="1" max="99" required /></label></p>
+                <p><label><?php esc_html_e('Name', 'adoology-for-woocommerce'); ?><input name="adoology_name" type="text" maxlength="190" autocomplete="name" required /></label></p>
+                <p><label><?php esc_html_e('Phone', 'adoology-for-woocommerce'); ?><input name="adoology_phone" type="tel" maxlength="40" autocomplete="tel" required /></label></p>
+                <p><label><?php esc_html_e('Email', 'adoology-for-woocommerce'); ?><input name="adoology_email" type="email" maxlength="190" autocomplete="email" /></label></p>
+                <p><label><?php esc_html_e('Quantity', 'adoology-for-woocommerce'); ?><input name="quantity" type="number" value="1" min="1" max="99" required /></label></p>
                 <?php self::variation_field($product); ?>
-                <p class="adoology-wide"><label><?php esc_html_e('Address', 'adoology-connector'); ?><input name="adoology_address" type="text" maxlength="500" autocomplete="street-address" required /></label></p>
-                <p><label><?php esc_html_e('City', 'adoology-connector'); ?><input name="adoology_city" type="text" maxlength="190" autocomplete="address-level2" required /></label></p>
-                <p><label><?php esc_html_e('Country', 'adoology-connector'); ?><input name="adoology_country" type="text" maxlength="2" value="<?php echo esc_attr($country); ?>" autocomplete="country" required /></label></p>
-                <p><label><?php esc_html_e('Postcode', 'adoology-connector'); ?><input name="adoology_postcode" type="text" maxlength="30" autocomplete="postal-code" /></label></p>
-                <p><label><?php esc_html_e('Delivery', 'adoology-connector'); ?><select name="delivery_option" required><?php foreach ($delivery as $value => $option) : ?><option value="<?php echo esc_attr($value); ?>"><?php echo esc_html($option['label'] . ($option['cost'] > 0 ? ' - ' . wp_strip_all_tags(wc_price($option['cost'])) : '')); ?></option><?php endforeach; ?></select></label></p>
-                <p><label><?php esc_html_e('Preferred payment', 'adoology-connector'); ?><select name="payment_method" required><?php foreach ($gateways as $gateway) : ?><option value="<?php echo esc_attr($gateway->id); ?>"><?php echo esc_html($gateway->get_title()); ?></option><?php endforeach; ?></select></label></p>
+                <p class="adoology-wide"><label><?php esc_html_e('Address', 'adoology-for-woocommerce'); ?><input name="adoology_address" type="text" maxlength="500" autocomplete="street-address" required /></label></p>
+                <p><label><?php esc_html_e('City', 'adoology-for-woocommerce'); ?><input name="adoology_city" type="text" maxlength="190" autocomplete="address-level2" required /></label></p>
+                <p><label><?php esc_html_e('Country', 'adoology-for-woocommerce'); ?><input name="adoology_country" type="text" maxlength="2" value="<?php echo esc_attr($country); ?>" autocomplete="country" required /></label></p>
+                <p><label><?php esc_html_e('Postcode', 'adoology-for-woocommerce'); ?><input name="adoology_postcode" type="text" maxlength="30" autocomplete="postal-code" /></label></p>
+                <p><label><?php esc_html_e('Delivery', 'adoology-for-woocommerce'); ?><select name="delivery_option" required><?php foreach ($delivery as $value => $option) : ?><option value="<?php echo esc_attr($value); ?>"><?php echo esc_html($option['label'] . ($option['cost'] > 0 ? ' - ' . wp_strip_all_tags(wc_price($option['cost'])) : '')); ?></option><?php endforeach; ?></select></label></p>
+                <p><label><?php esc_html_e('Preferred payment', 'adoology-for-woocommerce'); ?><select name="payment_method" required><?php foreach ($gateways as $gateway) : ?><option value="<?php echo esc_attr($gateway->id); ?>"><?php echo esc_html($gateway->get_title()); ?></option><?php endforeach; ?></select></label></p>
             </div>
-            <p class="adoology-honeypot" aria-hidden="true"><label>Website<input name="adoology_website" type="text" tabindex="-1" autocomplete="off" /></label></p>
-            <button type="submit" class="adoology-submit"><?php esc_html_e('Place order', 'adoology-connector'); ?></button>
+            <p class="adoology-honeypot" aria-hidden="true"><label><?php esc_html_e('Website', 'adoology-for-woocommerce'); ?><input name="adoology_website" type="text" tabindex="-1" autocomplete="off" /></label></p>
+            <button type="submit" class="adoology-submit"><?php esc_html_e('Place order', 'adoology-for-woocommerce'); ?></button>
         </form>
         <?php
         return ob_get_clean();
@@ -161,7 +163,7 @@ class OrderForm
         $referer = wp_get_referer() ?: home_url('/');
         $nonce = sanitize_text_field(wp_unslash($_POST['_adoology_nonce'] ?? ''));
         if (!wp_verify_nonce($nonce, 'adoology_submit_order') || Options::get('adoology_order_form_enabled', 'yes') !== 'yes') {
-            self::fail(__('Order form security check failed.', 'adoology-connector'), $referer);
+            self::fail(__('Order form security check failed.', 'adoology-for-woocommerce'), $referer);
         }
 
         $product_id = absint($_POST['product_id'] ?? 0);
@@ -171,20 +173,20 @@ class OrderForm
         $variation = $variation_id && $product ? $product->get_variation_attributes() : [];
         $valid_add = apply_filters('woocommerce_add_to_cart_validation', true, $product_id, $quantity, $variation_id, $variation);
         if (!$product || !$product->is_purchasable() || ($variation_id && (int) $product->get_parent_id() !== $product_id) || !$product->has_enough_stock($quantity) || ($product->is_sold_individually() && $quantity > 1) || !$valid_add) {
-            self::fail(__('Selected product is unavailable.', 'adoology-connector'), $referer);
+            self::fail(__('Selected product is unavailable.', 'adoology-for-woocommerce'), $referer);
         }
 
         // A variable product never proceeds without an explicitly selected
         // variation; the unmanaged parent path would bypass child stock and
         // option validation.
         if ($variation_id === 0 && $product->get_type() === 'variable') {
-            self::fail(__('Please choose a product option.', 'adoology-connector'), $referer);
+            self::fail(__('Please choose a product option.', 'adoology-for-woocommerce'), $referer);
         }
 
         // Explicit stock status check: reservation-disabled configurations
         // skip the native gate that would otherwise reject out-of-stock items.
         if (!$product->is_in_stock()) {
-            self::fail(__('Selected product is unavailable.', 'adoology-connector'), $referer);
+            self::fail(__('Selected product is unavailable.', 'adoology-for-woocommerce'), $referer);
         }
 
         // Honor the store checkout registration policy: when account creation
@@ -192,7 +194,7 @@ class OrderForm
         $registration_required = (string) get_option('woocommerce_enable_signup_and_login_from_checkout', 'yes') === 'yes'
             && (string) get_option('woocommerce_enable_guest_checkout', 'yes') === 'no';
         if ($registration_required && !get_current_user_id()) {
-            self::fail(__('Please sign in to place your order.', 'adoology-connector'), $referer);
+            self::fail(__('Please sign in to place your order.', 'adoology-for-woocommerce'), $referer);
         }
 
         $name = sanitize_text_field(wp_unslash($_POST['adoology_name'] ?? ''));
@@ -204,7 +206,7 @@ class OrderForm
         $submitted_country = strtoupper(sanitize_key(wp_unslash($_POST['adoology_country'] ?? '')));
         $country = preg_match('/^[A-Z]{2}$/', $submitted_country) === 1 ? $submitted_country : sanitize_key(WC()->countries->get_base_country());
         if ($name === '' || $phone === '' || $address === '' || $city === '') {
-            self::fail(__('Name, phone, address, and city are required.', 'adoology-connector'), $referer);
+            self::fail(__('Name, phone, address, and city are required.', 'adoology-for-woocommerce'), $referer);
         }
 
         $checkout_id = sanitize_text_field(wp_unslash($_POST['_adoology_checkout_id'] ?? ''));
@@ -257,7 +259,7 @@ class OrderForm
             'items' => [['product_id' => $product_id, 'variation_id' => $variation_id, 'quantity' => $quantity]],
         ]);
         if (is_wp_error($snapshot)) {
-            self::fail(__('Could not prepare this order. Please try again.', 'adoology-connector'), $referer);
+            self::fail(__('Could not prepare this order. Please try again.', 'adoology-for-woocommerce'), $referer);
         }
         $claim = IncompleteOrders::claim_submission($checkout_id);
         if (is_wp_error($claim)) {
@@ -277,7 +279,7 @@ class OrderForm
         $delivery_option = sanitize_key(wp_unslash($_POST['delivery_option'] ?? ''));
         if (!hash_equals(hash_hmac('sha256', (int) $product_id . '|' . $delivery_data, wp_salt('nonce')), $delivery_signature) || !is_array($delivery_options) || !isset($delivery_options[$delivery_option])) {
             IncompleteOrders::release_submission($checkout_id);
-            self::fail(__('Selected delivery option is unavailable.', 'adoology-connector'), $referer);
+            self::fail(__('Selected delivery option is unavailable.', 'adoology-for-woocommerce'), $referer);
         }
 
         $order = null;
@@ -300,7 +302,7 @@ class OrderForm
             $payment_method = sanitize_key(wp_unslash($_POST['payment_method'] ?? ''));
             $gateways = self::enabled_gateways();
             if (!isset($gateways[$payment_method])) {
-                throw new Exception(__('Selected payment method is unavailable.', 'adoology-connector'));
+                throw new Exception(__('Selected payment method is unavailable.', 'adoology-for-woocommerce'));
             }
             $order->update_meta_data('_adoology_preferred_payment_method', $payment_method);
             $shipping = new WC_Order_Item_Shipping;
@@ -334,7 +336,7 @@ class OrderForm
             }
             IncompleteOrders::release_submission($checkout_id);
             Logger::log('error', 'Landing-page order creation failed.', ['error' => $throwable->getMessage()]);
-            self::fail(__('Could not create the order. Please review your details and try again.', 'adoology-connector'), $referer);
+            self::fail(__('Could not create the order. Please review your details and try again.', 'adoology-for-woocommerce'), $referer);
 
             return;
         }
@@ -348,8 +350,8 @@ class OrderForm
         if (!$product->is_type('variable')) {
             return;
         }
-        echo '<p class="adoology-wide"><label>' . esc_html__('Variation', 'adoology-connector') . '<select name="variation_id" required>';
-        echo '<option value="">' . esc_html__('Choose an option', 'adoology-connector') . '</option>';
+        echo '<p class="adoology-wide"><label>' . esc_html__('Variation', 'adoology-for-woocommerce') . '<select name="variation_id" required>';
+        echo '<option value="">' . esc_html__('Choose an option', 'adoology-for-woocommerce') . '</option>';
         foreach ($product->get_children() as $variation_id) {
             $variation = wc_get_product($variation_id);
             if ($variation && $variation->is_purchasable() && $variation->is_in_stock()) {
@@ -372,7 +374,7 @@ class OrderForm
             }
         }
 
-        return $options ?: ['standard' => ['label' => __('Standard delivery', 'adoology-connector'), 'cost' => 0]];
+        return $options ?: ['standard' => ['label' => __('Standard delivery', 'adoology-for-woocommerce'), 'cost' => 0]];
     }
 
     private static function split_name($name)
@@ -420,18 +422,16 @@ class OrderForm
         return substr($hash, 0, 8) . '-' . substr($hash, 8, 4) . '-4' . substr($hash, 13, 3) . '-a' . substr($hash, 17, 3) . '-' . substr($hash, 20, 12);
     }
 
-    private static function styles()
+    /**
+     * Enqueue before the page head so forms rendered by widgets or templates
+     * receive their styles as well as forms in post content.
+     */
+    public static function enqueue_styles()
     {
-        static $rendered = false;
-        if ($rendered) {
+        if (Options::get('adoology_order_form_enabled', 'yes') !== 'yes') {
             return;
         }
-        $rendered = true;
-        ?>
-        <style>
-            .adoology-order-form{--ado-ink:#14231d;--ado-accent:#e85d35;max-width:680px;padding:clamp(22px,4vw,38px);border:1px solid #dce4df;border-radius:22px;background:#f7faf8;box-shadow:0 22px 60px rgba(20,35,29,.10);color:var(--ado-ink)}
-            .adoology-form-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:24px}.adoology-form-head h3{margin:3px 0 0;font-size:clamp(25px,4vw,38px);line-height:1}.adoology-form-kicker{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:#557066}.adoology-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.adoology-form-grid p{margin:0}.adoology-form-grid label{display:grid;gap:6px;font-size:13px;font-weight:650}.adoology-form-grid input,.adoology-form-grid select{width:100%;min-height:46px;padding:10px 12px;border:1px solid #cbd8d1;border-radius:10px;background:#fff;color:var(--ado-ink)}.adoology-wide{grid-column:1/-1}.adoology-submit{width:100%;margin-top:20px;padding:15px 20px;border:0;border-radius:12px;background:var(--ado-accent);color:#fff;font-weight:750;cursor:pointer}.adoology-submit:hover{filter:brightness(.94)}.adoology-form-error{margin-bottom:18px;padding:12px;border-left:4px solid #b42318;background:#fff1f0;color:#7a271a}.adoology-honeypot{position:absolute!important;left:-10000px!important;width:1px!important;height:1px!important;overflow:hidden!important}@media(max-width:580px){.adoology-form-grid{grid-template-columns:1fr}.adoology-wide{grid-column:auto}.adoology-form-head{align-items:flex-start;flex-direction:column}}
-        </style>
-        <?php
+
+        wp_enqueue_style('adoology-order-form', plugins_url('assets/css/order-form.css', ADOOLOGY_PLUGIN_FILE), [], ADOOLOGY_VERSION);
     }
 }

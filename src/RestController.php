@@ -61,14 +61,14 @@ class RestController
     {
         $secret = (string) get_option('adoology_inbound_secret', '');
         if ($secret === '') {
-            return new WP_Error('adoology_not_configured', __('No inbound signing secret configured.', 'adoology-connector'), ['status' => 503]);
+            return new WP_Error('adoology_not_configured', __('No inbound signing secret configured.', 'adoology-for-woocommerce'), ['status' => 503]);
         }
 
         $signature = (string) $request->get_header('x-adoology-signature');
         $expected = 'sha256=' . hash_hmac('sha256', $request->get_body(), $secret);
 
         if (!hash_equals($expected, $signature)) {
-            return new WP_Error('adoology_bad_signature', __('Invalid webhook signature.', 'adoology-connector'), ['status' => 401]);
+            return new WP_Error('adoology_bad_signature', __('Invalid webhook signature.', 'adoology-for-woocommerce'), ['status' => 401]);
         }
 
         return true;
@@ -86,14 +86,14 @@ class RestController
         if (!in_array($event, self::ACCEPTED_EVENTS, true)) {
             return new WP_Error('adoology_unknown_event', sprintf(
                 /* translators: %s: webhook event name */
-                __('Unsupported event: %s', 'adoology-connector'),
+                __('Unsupported event: %s', 'adoology-for-woocommerce'),
                 $event
             ), ['status' => 422]);
         }
 
         $data = $request->get_param('data');
         if (!is_array($data)) {
-            return new WP_Error('adoology_bad_payload', __('Missing data payload.', 'adoology-connector'), ['status' => 422]);
+            return new WP_Error('adoology_bad_payload', __('Missing data payload.', 'adoology-for-woocommerce'), ['status' => 422]);
         }
 
         $quantity = isset($data['quantity']) && is_numeric($data['quantity'])
@@ -101,12 +101,12 @@ class RestController
             : null;
 
         if ($quantity === null) {
-            return new WP_Error('adoology_bad_quantity', __('data.quantity must be numeric.', 'adoology-connector'), ['status' => 422]);
+            return new WP_Error('adoology_bad_quantity', __('data.quantity must be numeric.', 'adoology-for-woocommerce'), ['status' => 422]);
         }
 
         $product = self::resolve_product($data);
         if (!$product instanceof WC_Product) {
-            return new WP_Error('adoology_product_not_found', __('No product matches the payload (sku / product_id / variation_id).', 'adoology-connector'), ['status' => 404]);
+            return new WP_Error('adoology_product_not_found', __('No product matches the payload (sku / product_id / variation_id).', 'adoology-for-woocommerce'), ['status' => 404]);
         }
 
         wc_update_product_stock($product, $quantity, 'set');

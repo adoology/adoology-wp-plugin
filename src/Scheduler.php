@@ -49,7 +49,7 @@ class Scheduler
             return $scheduled;
         }
 
-        return $scheduled ? true : new WP_Error('adoology_schedule_failed', __('Could not schedule background work.', 'adoology-connector'));
+        return $scheduled ? true : new WP_Error('adoology_schedule_failed', __('Could not schedule background work.', 'adoology-for-woocommerce'));
     }
 
     /**

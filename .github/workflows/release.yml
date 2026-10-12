@@ -33,7 +33,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "archive=adoology-connector-${version}.zip" >> "$GITHUB_OUTPUT"
+          echo "archive=adoology-for-woocommerce-${version}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Validate release version
         env:
@@ -76,22 +76,26 @@ jobs:
         env:
           ARCHIVE_NAME: ${{ steps.metadata.outputs.archive }}
         run: |
-          mkdir -p build/adoology-connector
-          cp adoology-connector.php uninstall.php readme.txt build/adoology-connector/
-          cp -R assets src vendor build/adoology-connector/
-          (cd build && zip -r -9 "../${ARCHIVE_NAME}" adoology-connector)
+          mkdir -p build/adoology-for-woocommerce
+          cp adoology-connector.php uninstall.php readme.txt composer.json composer.lock build/adoology-for-woocommerce/
+          cp -R assets src vendor build/adoology-for-woocommerce/
+          (cd build && zip -r -9 "../${ARCHIVE_NAME}" adoology-for-woocommerce)
 
       - name: Verify installable ZIP
         env:
           ARCHIVE_NAME: ${{ steps.metadata.outputs.archive }}
         run: |
           unzip -q "$ARCHIVE_NAME" -d verify
-          test -f verify/adoology-connector/adoology-connector.php
-          test -f verify/adoology-connector/vendor/autoload.php
-          test ! -e verify/adoology-connector/composer.json
-          test ! -e verify/adoology-connector/composer.lock
-          test ! -e verify/adoology-connector/tests
-          php -r "require 'verify/adoology-connector/vendor/autoload.php'; exit(class_exists('Adoology\\Plugin') ? 0 : 1);"
+          test -f verify/adoology-for-woocommerce/adoology-connector.php
+          test -f verify/adoology-for-woocommerce/vendor/autoload.php
+          test -f verify/adoology-for-woocommerce/composer.json
+          test -f verify/adoology-for-woocommerce/composer.lock
+          test -f verify/adoology-for-woocommerce/assets/css/admin.css
+          test -f verify/adoology-for-woocommerce/assets/css/order-form.css
+          test -f verify/adoology-for-woocommerce/assets/js/admin.js
+          test ! -e verify/adoology-for-woocommerce/tests
+          test ! -e verify/adoology-for-woocommerce/review.md
+          php -r "require 'verify/adoology-for-woocommerce/vendor/autoload.php'; exit(class_exists('Adoology\\Plugin') ? 0 : 1);"
 
       - name: Create release and upload ZIP
         env:

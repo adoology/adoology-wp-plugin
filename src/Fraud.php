@@ -44,7 +44,7 @@ class Fraud
     public static function render_honeypot()
     {
         echo '<p style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden" aria-hidden="true">';
-        echo '<label for="adoology_website">' . esc_html__('Website', 'adoology-connector') . '</label>';
+        echo '<label for="adoology_website">' . esc_html__('Website', 'adoology-for-woocommerce') . '</label>';
         echo '<input type="text" id="adoology_website" name="adoology_website" value="" tabindex="-1" autocomplete="off" />';
         echo '</p>';
     }
@@ -60,7 +60,8 @@ class Fraud
         if (!self::enabled()) {
             return;
         }
-        $data['honeypot'] = isset($_POST['adoology_website']) ? sanitize_text_field(wp_unslash($_POST['adoology_website'])) : '';
+        // WooCommerce verifies woocommerce-process-checkout-nonce before invoking this validation hook.
+        $data['honeypot'] = isset($_POST['adoology_website']) ? sanitize_text_field(wp_unslash($_POST['adoology_website'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified by WooCommerce's checkout handler.
         self::$assessment = self::evaluate($data, self::cart_product_ids(), true);
         if (self::$assessment['action'] === 'block') {
             $errors->add('adoology_risk_blocked', self::rejection_message(self::$assessment));
@@ -218,10 +219,10 @@ class Fraud
     public static function rejection_message($assessment)
     {
         if (in_array('duplicate_order_block', (array) ($assessment['signals'] ?? []), true)) {
-            return __('You recently placed an order. Please wait a few minutes before placing another.', 'adoology-connector');
+            return __('You recently placed an order. Please wait a few minutes before placing another.', 'adoology-for-woocommerce');
         }
 
-        return __('We could not accept this order. Please contact the store for assistance.', 'adoology-connector');
+        return __('We could not accept this order. Please contact the store for assistance.', 'adoology-for-woocommerce');
     }
 
     /**
@@ -280,9 +281,9 @@ class Fraud
         $signals = json_decode((string) $order->get_meta('_adoology_risk_signals', true), true);
         $signals = is_array($signals) ? $signals : [];
         if ($action === 'hold' && !in_array($order->get_status(), ['cancelled', 'refunded', 'completed'], true)) {
-            $order->update_status('on-hold', __('Held by Adoology local risk assessment.', 'adoology-connector'));
+            $order->update_status('on-hold', __('Held by Adoology local risk assessment.', 'adoology-for-woocommerce'));
         } elseif ($action === 'flag') {
-            $order->add_order_note(__('Flagged by Adoology local risk assessment.', 'adoology-connector'));
+            $order->add_order_note(__('Flagged by Adoology local risk assessment.', 'adoology-for-woocommerce'));
         }
 
         $identity = IncompleteOrders::identity_for_checkout((string) $order->get_meta('_adoology_checkout_id', true));

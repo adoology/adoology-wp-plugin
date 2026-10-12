@@ -8,7 +8,7 @@
 
     blocks.registerBlockType('adoology/order-form', {
         apiVersion: 2,
-        title: i18n.__('Adoology Order Form', 'adoology-connector'),
+        title: i18n.__('Adoology Order Form', 'adoology-for-woocommerce'),
         icon: 'cart',
         category: 'widgets',
         attributes: {
@@ -18,23 +18,23 @@
         edit: function (props) {
             return el('div', { className: props.className },
                 el(InspectorControls, {},
-                    el(PanelBody, { title: i18n.__('Order form', 'adoology-connector'), initialOpen: true },
+                    el(PanelBody, { title: i18n.__('Order form', 'adoology-for-woocommerce'), initialOpen: true },
                         el(TextControl, {
-                            label: i18n.__('Product ID', 'adoology-connector'),
+                            label: i18n.__('Product ID', 'adoology-for-woocommerce'),
                             type: 'number',
                             value: props.attributes.productId || '',
                             onChange: function (value) { props.setAttributes({ productId: parseInt(value || 0, 10) }); }
                         }),
                         el(TextControl, {
-                            label: i18n.__('Title', 'adoology-connector'),
+                            label: i18n.__('Title', 'adoology-for-woocommerce'),
                             value: props.attributes.title,
                             onChange: function (value) { props.setAttributes({ title: value }); }
                         })
                     )
                 ),
                 el('div', { style: { padding: '24px', border: '1px solid #ccd0d4', borderRadius: '12px' } },
-                    el('strong', {}, props.attributes.title || i18n.__('Adoology Order Form', 'adoology-connector')),
-                    el('p', {}, props.attributes.productId ? i18n.sprintf(i18n.__('Product ID: %d', 'adoology-connector'), props.attributes.productId) : i18n.__('Choose a product ID in block settings.', 'adoology-connector'))
+                    el('strong', {}, props.attributes.title || i18n.__('Adoology Order Form', 'adoology-for-woocommerce')),
+                    el('p', {}, props.attributes.productId ? i18n.sprintf(i18n.__('Product ID: %d', 'adoology-for-woocommerce'), props.attributes.productId) : i18n.__('Choose a product ID in block settings.', 'adoology-for-woocommerce'))
                 )
             );
         },

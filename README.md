@@ -2,7 +2,7 @@
 
 Adoology for WooCommerce connects a WooCommerce store to an Adoology workspace for catalog, customer, order, and inventory synchronization. It also provides durable storefront event delivery, configurable incomplete-order tracking, local fraud protection, and a cart-independent landing-page order form.
 
-Current plugin version: `0.1.7`
+Current plugin version: `0.1.8`
 
 ## Contents
 
@@ -118,7 +118,7 @@ Plugin and backend releases that implement this contract must be deployed togeth
 
 ### WordPress admin
 
-1. Open the repository's GitHub release and download the attached `adoology-connector-VERSION.zip` file. Do not use GitHub's automatically generated **Source code** archives because they do not contain Composer dependencies.
+1. Open the repository's GitHub release and download the attached `adoology-for-woocommerce-VERSION.zip` file. Do not use GitHub's automatically generated **Source code** archives because they do not contain Composer dependencies.
 2. Open **Plugins > Add New Plugin > Upload Plugin**.
 3. Upload the archive and select **Install Now**.
 4. Activate **Adoology for WooCommerce**.
@@ -129,16 +129,16 @@ Plugin and backend releases that implement this contract must be deployed togeth
 Copy the plugin into:
 
 ```text
-wp-content/plugins/adoology-connector/
+wp-content/plugins/adoology-for-woocommerce/
 ```
 
 Then activate it from WordPress admin or WP-CLI:
 
 ```bash
-wp plugin activate adoology-connector
+wp plugin activate adoology-for-woocommerce
 ```
 
-No Composer or npm installation is required by the plugin package. Runtime PHP and JavaScript are committed directly.
+No Composer or npm installation is required by the release package. Production Composer autoload files and runtime assets are included. Source checkouts require `composer install`.
 
 ### Multisite
 
@@ -607,7 +607,7 @@ Open **WooCommerce > Status > Logs** and select source `adoology-connector` for 
 ### Useful WP-CLI commands
 
 ```bash
-wp plugin status adoology-connector
+wp plugin status adoology-for-woocommerce
 wp cron event list
 wp cron event run --due-now
 wp option get adoology_connection_state --format=json
@@ -801,5 +801,7 @@ Unit tests cover crypto round-trips, option handling, log redaction, API URL/tok
 7. Test mobile and desktop order-form layouts.
 8. Review privacy-policy language and default consent behavior.
 9. Commit and push the release changes, then create and push the matching version tag, for example `git tag v0.1.0 && git push origin v0.1.0`.
-10. Confirm the **Release plugin** GitHub Actions workflow succeeds and attaches `adoology-connector-VERSION.zip` to the release.
-11. Download and install the attached ZIP in a clean WordPress site. The workflow includes optimized production Composer autoload files under `vendor/` while excluding `composer.json`, `composer.lock`, tests, and local tooling.
+10. Confirm the **Release plugin** GitHub Actions workflow succeeds and attaches `adoology-for-woocommerce-VERSION.zip` to the release.
+11. Download and install the attached ZIP in a clean WordPress site. The archive uses the `adoology-for-woocommerce/` directory and includes optimized production Composer autoload files under `vendor/`, `composer.json`, and `composer.lock`, while excluding tests and local tooling.
+12. Before WordPress.org resubmission, add verified, publicly accessible Adoology Terms of Service and Privacy Policy links to the External services section in `readme.txt`. Run Plugin Check on the final ZIP and verify the claimed WordPress compatibility on a real site.
+13. Complete ownership verification using the review email's DNS TXT record, a WordPress.org email under `adoology.com`, or a submission transfer requested in the existing review thread. Upload the corrected ZIP to the existing submission and reply to that thread.

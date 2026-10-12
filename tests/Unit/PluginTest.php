@@ -69,6 +69,7 @@ class PluginTest extends TestCase
     public function test_action_links_prepends_dashboard()
     {
         when('admin_url')->returnArg();
+        when('esc_url')->returnArg();
         when('esc_html__')->returnArg();
 
         $links = Plugin::action_links(['<a href="deactivate">Deactivate</a>']);

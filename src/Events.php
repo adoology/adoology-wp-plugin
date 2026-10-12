@@ -54,7 +54,7 @@ class Events
         $session_id = substr(sanitize_text_field((string) $session_id), 0, 128);
         $connection_id = Connection::connection_id();
         if ($name === '' || $anonymous_id === '') {
-            return new WP_Error('adoology_invalid_event', __('Event name and anonymous identifier are required.', 'adoology-connector'));
+            return new WP_Error('adoology_invalid_event', __('Event name and anonymous identifier are required.', 'adoology-for-woocommerce'));
         }
 
         $event_id = self::ulid();
@@ -71,7 +71,7 @@ class Events
         ];
         $json = wp_json_encode($event);
         if (!is_string($json) || strlen($json) > 65535) {
-            return new WP_Error('adoology_event_too_large', __('Event payload is too large.', 'adoology-connector'));
+            return new WP_Error('adoology_event_too_large', __('Event payload is too large.', 'adoology-for-woocommerce'));
         }
 
         $encrypted = Crypto::encrypt($json, 'adoology_event_' . $event_id);
@@ -96,7 +96,7 @@ class Events
             ['%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s']
         );
         if (!$inserted) {
-            return new WP_Error('adoology_event_store_failed', __('Could not queue the Adoology event.', 'adoology-connector'));
+            return new WP_Error('adoology_event_store_failed', __('Could not queue the Adoology event.', 'adoology-for-woocommerce'));
         }
 
         self::schedule_processing();

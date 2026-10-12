@@ -1,0 +1,111 @@
+.adoology-order-form {
+    --ado-ink: #14231d;
+    --ado-accent: #e85d35;
+    max-width: 680px;
+    padding: clamp(22px, 4vw, 38px);
+    border: 1px solid #dce4df;
+    border-radius: 22px;
+    background: #f7faf8;
+    box-shadow: 0 22px 60px rgba(20, 35, 29, .10);
+    color: var(--ado-ink);
+}
+
+.adoology-form-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: flex-end;
+    margin-bottom: 24px;
+}
+
+.adoology-form-head h3 {
+    margin: 3px 0 0;
+    font-size: clamp(25px, 4vw, 38px);
+    line-height: 1;
+}
+
+.adoology-form-kicker {
+    font-size: 12px;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    color: #557066;
+}
+
+.adoology-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}
+
+.adoology-form-grid p {
+    margin: 0;
+}
+
+.adoology-form-grid label {
+    display: grid;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.adoology-form-grid input,
+.adoology-form-grid select {
+    width: 100%;
+    min-height: 46px;
+    padding: 10px 12px;
+    border: 1px solid #cbd8d1;
+    border-radius: 10px;
+    background: #fff;
+    color: var(--ado-ink);
+}
+
+.adoology-wide {
+    grid-column: 1 / -1;
+}
+
+.adoology-submit {
+    width: 100%;
+    margin-top: 20px;
+    padding: 15px 20px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--ado-accent);
+    color: #fff;
+    font-weight: 750;
+    cursor: pointer;
+}
+
+.adoology-submit:hover {
+    filter: brightness(.94);
+}
+
+.adoology-form-error {
+    margin-bottom: 18px;
+    padding: 12px;
+    border-left: 4px solid #b42318;
+    background: #fff1f0;
+    color: #7a271a;
+}
+
+.adoology-honeypot {
+    position: absolute !important;
+    left: -10000px !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+}
+
+@media (max-width: 580px) {
+    .adoology-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .adoology-wide {
+        grid-column: auto;
+    }
+
+    .adoology-form-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
