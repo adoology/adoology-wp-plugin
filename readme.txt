@@ -5,7 +5,7 @@ Requires at least: 6.0
 Requires PHP: 7.4
 Requires Plugins: woocommerce
 Tested up to: 7.1
-Stable tag: 0.1.8
+Stable tag: 0.1.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -51,6 +51,11 @@ The plugin bundles its CSS and JavaScript locally. Storefront tracking requests 
 5. Review the store privacy policy and obtain any required consent before enabling incomplete-order tracking.
 
 == Changelog ==
+
+= 0.1.9 =
+* Add the readme short description for the plugin directory.
+* Improve admin request-method and webhook header sanitization.
+* Keep privacy-policy markup outside translated strings.
 
 = 0.1.8 =
 * Use WordPress asset queues for order-form and admin styles and disconnect confirmation.
