@@ -9,6 +9,8 @@ Stable tag: 0.1.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
+Connect WooCommerce to Adoology for catalog, customer, order, and inventory synchronization.
+
 == Description ==
 
 Connect your WooCommerce store with Adoology.

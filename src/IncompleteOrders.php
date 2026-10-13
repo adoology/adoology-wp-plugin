@@ -1241,7 +1241,7 @@ class IncompleteOrders
         }
         wp_add_privacy_policy_content(
             __('Adoology for WooCommerce', 'adoology-for-woocommerce'),
-            wp_kses_post(__('<p>After this store connects to Adoology and authorizes WooCommerce API access, products, inventory, customer details, and orders are synchronized with Adoology. When incomplete-order tracking is enabled, checkout contact, address, product, session, IP address, and browser information is encrypted locally and sent to the connected workspace for order recovery. Fraud protection also sends order/product identifiers, risk scores and signals, IP addresses, browser information, and anonymous/session identifiers when enabled, even if incomplete-order tracking is disabled. Local data follows the configured retention period; data already delivered to Adoology must be erased from the workspace separately.</p>', 'adoology-for-woocommerce'))
+            wp_kses_post('<p>' . __('After this store connects to Adoology and authorizes WooCommerce API access, products, inventory, customer details, and orders are synchronized with Adoology. When incomplete-order tracking is enabled, checkout contact, address, product, session, IP address, and browser information is encrypted locally and sent to the connected workspace for order recovery. Fraud protection also sends order/product identifiers, risk scores and signals, IP addresses, browser information, and anonymous/session identifiers when enabled, even if incomplete-order tracking is disabled. Local data follows the configured retention period; data already delivered to Adoology must be erased from the workspace separately.', 'adoology-for-woocommerce') . '</p>')
         );
     }
 

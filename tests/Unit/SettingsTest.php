@@ -27,6 +27,8 @@ class SettingsTest extends TestCase
         $wpdb->shouldNotReceive('query');
 
         when('current_user_can')->justReturn($can_manage);
+        when('wp_unslash')->returnArg();
+        when('sanitize_text_field')->returnArg();
         when('esc_html__')->returnArg();
         when('wp_die')->alias(function () {
             throw new RuntimeException('Request rejected');

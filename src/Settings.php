@@ -729,7 +729,8 @@ class Settings
      */
     private function authorize_action($action)
     {
-        if (!current_user_can('manage_woocommerce') || ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        $request_method = isset($_SERVER['REQUEST_METHOD']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD'])) : '';
+        if (!current_user_can('manage_woocommerce') || $request_method !== 'POST') {
             wp_die(esc_html__('Security check failed.', 'adoology-for-woocommerce'));
         }
         check_admin_referer($action);
