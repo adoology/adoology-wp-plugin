@@ -28,38 +28,7 @@ function adoology_uninstall_site()
     if (class_exists(Connection::class)) {
         Connection::delete_managed_woocommerce_credentials();
     } else {
-        $webhook_table = $wpdb->prefix . 'wc_webhooks';
         $key_table = $wpdb->prefix . 'woocommerce_api_keys';
-        $webhooks = $wpdb->get_results($wpdb->prepare(
-            "SELECT webhook_id, name FROM {$webhook_table} WHERE name LIKE %s OR name LIKE %s",
-            $wpdb->esc_like('Adoology ') . '%',
-            $wpdb->esc_like('Adoology: ') . '%'
-        ), ARRAY_A);
-        $webhook_names = [
-            'Adoology customer.created',
-            'Adoology customer.deleted',
-            'Adoology customer.updated',
-            'Adoology order.created',
-            'Adoology order.deleted',
-            'Adoology order.updated',
-            'Adoology product.created',
-            'Adoology product.deleted',
-            'Adoology product.updated',
-            'Adoology: customer.created',
-            'Adoology: customer.deleted',
-            'Adoology: customer.updated',
-            'Adoology: order.created',
-            'Adoology: order.deleted',
-            'Adoology: order.updated',
-            'Adoology: product.created',
-            'Adoology: product.deleted',
-            'Adoology: product.updated',
-        ];
-        foreach ($webhooks as $webhook) {
-            if (in_array((string) $webhook['name'], $webhook_names, true)) {
-                $wpdb->delete($webhook_table, ['webhook_id' => (int) $webhook['webhook_id'], 'name' => $webhook['name']], ['%d', '%s']);
-            }
-        }
         $keys = $wpdb->get_results($wpdb->prepare(
             "SELECT key_id, description FROM {$key_table} WHERE description = %s OR description LIKE %s OR description LIKE %s",
             'Adoology Connector',

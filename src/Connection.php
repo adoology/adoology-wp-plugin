@@ -22,29 +22,6 @@ class Connection
 
     const LEGACY_KEY_DESCRIPTION_PREFIX = 'Adoology - API (';
 
-    const WEBHOOK_NAME_PREFIX = 'Adoology ';
-
-    const WEBHOOK_NAMES = [
-        'Adoology customer.created',
-        'Adoology customer.deleted',
-        'Adoology customer.updated',
-        'Adoology order.created',
-        'Adoology order.deleted',
-        'Adoology order.updated',
-        'Adoology product.created',
-        'Adoology product.deleted',
-        'Adoology product.updated',
-        'Adoology: customer.created',
-        'Adoology: customer.deleted',
-        'Adoology: customer.updated',
-        'Adoology: order.created',
-        'Adoology: order.deleted',
-        'Adoology: order.updated',
-        'Adoology: product.created',
-        'Adoology: product.deleted',
-        'Adoology: product.updated',
-    ];
-
     /**
      * Register scheduled callbacks.
      */
@@ -354,11 +331,10 @@ class Connection
     }
 
     /**
-     * Revoke locally identifiable WooCommerce credentials synchronously.
+     * Revoke locally identifiable WooCommerce API keys synchronously.
      */
     public static function delete_managed_woocommerce_credentials()
     {
-        self::delete_managed_webhooks();
         self::delete_managed_api_keys();
     }
 
@@ -506,46 +482,6 @@ class Connection
             Options::update('adoology_connected_at', gmdate('Y-m-d H:i:s'));
         }
         Options::update('adoology_connection_state', $state);
-    }
-
-    /**
-     * Delete recorded and locally identifiable Adoology webhooks.
-     */
-    private static function delete_managed_webhooks()
-    {
-        global $wpdb;
-
-        $table = $wpdb->prefix . 'wc_webhooks';
-        $webhooks = $wpdb->get_results($wpdb->prepare(
-            "SELECT webhook_id, name FROM {$table} WHERE name LIKE %s OR name LIKE %s",
-            $wpdb->esc_like(self::WEBHOOK_NAME_PREFIX) . '%',
-            $wpdb->esc_like('Adoology: ') . '%'
-        ), ARRAY_A);
-        $recorded_ids = array_map('intval', (array) Options::get('adoology_wc_webhook_ids', []));
-        $deleted_recorded_ids = [];
-        foreach ($recorded_ids as $webhook_id) {
-            $webhook = function_exists('wc_get_webhook') ? wc_get_webhook($webhook_id) : null;
-            if ($webhook && in_array((string) $webhook->get_name(), self::WEBHOOK_NAMES, true)) {
-                $webhook->delete(true);
-                $deleted_recorded_ids[] = $webhook_id;
-            }
-        }
-        foreach ($webhooks as $row) {
-            if (in_array((int) $row['webhook_id'], $deleted_recorded_ids, true)) {
-                continue;
-            }
-            if (!in_array((string) $row['name'], self::WEBHOOK_NAMES, true)) {
-                continue;
-            }
-            $webhook_id = (int) $row['webhook_id'];
-            $webhook = function_exists('wc_get_webhook') ? wc_get_webhook((int) $webhook_id) : null;
-            if ($webhook && in_array((string) $webhook->get_name(), self::WEBHOOK_NAMES, true)) {
-                $webhook->delete(true);
-
-                continue;
-            }
-            $wpdb->delete($table, ['webhook_id' => $webhook_id, 'name' => $row['name']], ['%d', '%s']);
-        }
     }
 
     /**
