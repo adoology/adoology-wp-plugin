@@ -45,6 +45,7 @@ class Settings
         add_action('admin_post_adoology_disconnect', [$this, 'handle_disconnect']);
         add_action('admin_post_adoology_sync_products', [$this, 'handle_sync_products']);
         add_action('admin_post_adoology_retry_events', [$this, 'handle_retry_events']);
+        add_action('admin_post_adoology_sync_blocklist', [$this, 'handle_sync_blocklist']);
         add_filter('option_page_capability_adoology_settings', [$this, 'settings_capability']);
         add_filter('option_page_capability_adoology_features', [$this, 'settings_capability']);
     }
@@ -107,6 +108,7 @@ class Settings
         $checkbox_defaults = [
             'adoology_tracking_enabled' => 'no',
             'adoology_fraud_enabled' => 'yes',
+            'adoology_blocklist_enabled' => 'yes',
             'adoology_order_form_enabled' => 'yes',
         ];
         foreach ($checkbox_defaults as $option => $default) {
@@ -126,6 +128,11 @@ class Settings
             'adoology_fraud_hold_threshold' => 'sanitize_risk_threshold',
             'adoology_fraud_block_threshold' => 'sanitize_risk_threshold',
         ];
+        register_setting('adoology_features', 'adoology_ip_source', [
+            'type' => 'string',
+            'sanitize_callback' => [$this, 'sanitize_ip_source'],
+            'default' => 'remote_addr',
+        ]);
         foreach ($integer_sanitizers as $option => $sanitizer) {
             register_setting('adoology_features', $option, [
                 'type' => 'integer',
@@ -294,6 +301,25 @@ class Settings
     /**
      * Retry dead-letter and retrying event rows.
      */
+    public function handle_sync_blocklist()
+    {
+        $this->authorize_action('adoology_sync_blocklist');
+        $this->redirect_with_result('adoology_blocklist', Blocklist::refresh());
+    }
+
+    /**
+     * Which header holds the real visitor IP.
+     *
+     * @param  mixed  $value  Submitted value.
+     * @return string
+     */
+    public function sanitize_ip_source($value)
+    {
+        $value = sanitize_key((string) $value);
+
+        return in_array($value, ['remote_addr', 'cf-connecting-ip', 'x-forwarded-for'], true) ? $value : 'remote_addr';
+    }
+
     public function handle_retry_events()
     {
         global $wpdb;
@@ -601,6 +627,27 @@ class Settings
                 absint((int) Options::get('adoology_fraud_hold_threshold', 60)),
                 absint((int) Options::get('adoology_fraud_block_threshold', 90))
             ); ?></p>
+            <?php $blocklist = Blocklist::summary(); ?>
+            <h2><?php esc_html_e('Workspace blocklist', 'adoology-for-woocommerce'); ?></h2>
+            <p><?php esc_html_e('Phones, IP addresses and devices blocked in Adoology are refused at checkout. Manage the list in Adoology → Settings → Blocklist.', 'adoology-for-woocommerce'); ?></p>
+            <p><?php
+            if ($blocklist['fetched_at'] > 0) {
+                printf(
+                    /* translators: 1: number of blocks, 2: last sync time. */
+                    esc_html__('%1$d active blocks, last synced %2$s.', 'adoology-for-woocommerce'),
+                    absint($blocklist['count']),
+                    esc_html(wp_date(get_option('date_format') . ' ' . get_option('time_format'), $blocklist['fetched_at']))
+                );
+            } else {
+                esc_html_e('Not synced yet.', 'adoology-for-woocommerce');
+            }
+        ?></p>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('adoology_sync_blocklist'); ?>
+                <input type="hidden" name="action" value="adoology_sync_blocklist" />
+                <?php submit_button(__('Sync now', 'adoology-for-woocommerce'), 'secondary', 'submit', false); ?>
+            </form>
+            <h2><?php esc_html_e('Flagged orders', 'adoology-for-woocommerce'); ?></h2>
             <table class="widefat striped"><thead><tr><th><?php esc_html_e('Order', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Score', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Action', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Signals', 'adoology-for-woocommerce'); ?></th><th><?php esc_html_e('Status', 'adoology-for-woocommerce'); ?></th></tr></thead><tbody>
             <?php if (!$orders) : ?><tr><td colspan="5"><?php esc_html_e('No flagged orders.', 'adoology-for-woocommerce'); ?></td></tr><?php endif; ?>
             <?php foreach ($orders as $order) : ?><tr><td><a href="<?php echo esc_url($this->order_edit_url($order->get_id())); ?>">#<?php echo esc_html((string) $order->get_id()); ?></a></td><td><?php echo esc_html((string) $order->get_meta('_adoology_risk_score', true)); ?>/100</td><td><?php echo esc_html((string) $order->get_meta('_adoology_risk_action', true)); ?></td><td><?php echo esc_html(implode(', ', (array) json_decode((string) $order->get_meta('_adoology_risk_signals', true), true))); ?></td><td><?php echo esc_html(wc_get_order_status_name($order->get_status())); ?></td></tr><?php endforeach; ?>
@@ -640,6 +687,16 @@ class Settings
                     <?php $this->number_row('adoology_incomplete_timeout_minutes', __('Mark incomplete after (minutes)', 'adoology-for-woocommerce'), 5, 1440); ?>
                     <?php $this->number_row('adoology_incomplete_expire_days', __('Expire data after (days)', 'adoology-for-woocommerce'), 1, 90); ?>
                     <?php $this->checkbox_row('adoology_fraud_enabled', __('Fraud and bot protection', 'adoology-for-woocommerce')); ?>
+                    <?php $this->checkbox_row('adoology_blocklist_enabled', __('Enforce the Adoology blocklist at checkout', 'adoology-for-woocommerce')); ?>
+                    <tr><th scope="row"><label for="adoology_ip_source"><?php esc_html_e('Visitor IP comes from', 'adoology-for-woocommerce'); ?></label></th><td>
+                        <?php $ip_source = (string) Options::get('adoology_ip_source', 'remote_addr'); ?>
+                        <select id="adoology_ip_source" name="adoology_ip_source">
+                            <option value="remote_addr" <?php selected($ip_source, 'remote_addr'); ?>><?php esc_html_e('Direct connection (REMOTE_ADDR)', 'adoology-for-woocommerce'); ?></option>
+                            <option value="cf-connecting-ip" <?php selected($ip_source, 'cf-connecting-ip'); ?>><?php esc_html_e('Cloudflare (CF-Connecting-IP)', 'adoology-for-woocommerce'); ?></option>
+                            <option value="x-forwarded-for" <?php selected($ip_source, 'x-forwarded-for'); ?>><?php esc_html_e('Proxy or load balancer (X-Forwarded-For)', 'adoology-for-woocommerce'); ?></option>
+                        </select>
+                        <p class="description"><?php esc_html_e('Pick the header your host sets. Behind Cloudflare or a proxy, the direct connection is the proxy, so IP blocks would not work.', 'adoology-for-woocommerce'); ?></p>
+                    </td></tr>
                     <?php $this->number_row('adoology_fraud_rate_limit', __('Order attempts per 10 minutes', 'adoology-for-woocommerce'), 2, 100); ?>
                     <?php $this->number_row('adoology_duplicate_window_minutes', __('Duplicate-order window (minutes)', 'adoology-for-woocommerce'), 5, 1440); ?>
                     <?php $this->number_row('adoology_duplicate_block_minutes', __('Duplicate-order hard block (minutes, 0 disables)', 'adoology-for-woocommerce'), 0, 1440); ?>
@@ -755,6 +812,7 @@ class Settings
             'adoology_disconnect' => 'adoology-connection',
             'adoology_sync' => 'adoology-sync',
             'adoology_retry' => 'adoology-logs',
+            'adoology_blocklist' => 'adoology-fraud',
         ];
         wp_safe_redirect(add_query_arg('page', $pages[$action] ?? 'adoology', admin_url('admin.php')));
         exit;
@@ -771,6 +829,7 @@ class Settings
             'adoology_disconnect' => __('Store disconnected from Adoology.', 'adoology-for-woocommerce'),
             'adoology_sync' => __('Product synchronization started.', 'adoology-for-woocommerce'),
             'adoology_retry' => __('Failed events queued for retry.', 'adoology-for-woocommerce'),
+            'adoology_blocklist' => __('Blocklist synced.', 'adoology-for-woocommerce'),
         ];
         $transient = 'adoology_admin_notice_' . get_current_user_id();
         $notice = get_transient($transient);

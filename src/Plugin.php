@@ -54,6 +54,9 @@ final class Plugin
         KeyRevocation::register();
         Events::register();
         IncompleteOrders::register();
+        Device::register();
+        Blocklist::register();
+        BlocklistSync::register();
         Fraud::register();
         OrderForm::register();
         Settings::get_instance();
@@ -90,6 +93,7 @@ final class Plugin
             Events::CLEANUP_HOOK,
             IncompleteOrders::LIFECYCLE_HOOK,
             IncompleteOrders::COMPLETION_HOOK,
+            Blocklist::REFRESH_HOOK,
         ];
         foreach (array_merge($hooks, self::LEGACY_HOOKS) as $hook) {
             Scheduler::unschedule_hook($hook);
@@ -108,6 +112,9 @@ final class Plugin
         }
         if (!wp_next_scheduled(Events::PROCESS_HOOK)) {
             wp_schedule_event(time() + MINUTE_IN_SECONDS, 'adoology_five_minutes', Events::PROCESS_HOOK);
+        }
+        if (!wp_next_scheduled(Blocklist::REFRESH_HOOK)) {
+            wp_schedule_event(time() + MINUTE_IN_SECONDS, 'adoology_five_minutes', Blocklist::REFRESH_HOOK);
         }
         if (!wp_next_scheduled(Events::CLEANUP_HOOK)) {
             wp_schedule_event(time() + DAY_IN_SECONDS, 'daily', Events::CLEANUP_HOOK);
