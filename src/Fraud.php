@@ -58,6 +58,12 @@ class Fraud
     public static function validate_checkout($data, $errors)
     {
         if (!self::enabled()) {
+            // Explicit blocks apply even with risk scoring turned off.
+            $listed = self::blocklist_assessment($data['billing_phone'] ?? '', $data['billing_country'] ?? '', true);
+            if ($listed !== null) {
+                $errors->add('adoology_risk_blocked', self::rejection_message($listed));
+            }
+
             return;
         }
         // WooCommerce verifies woocommerce-process-checkout-nonce before invoking this validation hook.
@@ -105,7 +111,7 @@ class Fraud
      */
     public static function protect_store_api($order, $request)
     {
-        if (!$order instanceof WC_Order || !self::enabled()) {
+        if (!$order instanceof WC_Order) {
             return;
         }
         $billing = is_object($request) ? $request->get_param('billing_address') : [];
@@ -113,8 +119,18 @@ class Fraud
         $data = [
             'billing_phone' => $billing['phone'] ?? '',
             'billing_email' => $billing['email'] ?? '',
+            'billing_country' => $billing['country'] ?? '',
             'honeypot' => '',
         ];
+        if (!self::enabled()) {
+            // Explicit blocks apply even with risk scoring turned off.
+            $listed = self::blocklist_assessment($data['billing_phone'], $data['billing_country'], true);
+            if ($listed !== null && class_exists('Automattic\\WooCommerce\\StoreApi\\Exceptions\\RouteException')) {
+                throw new RouteException('adoology_risk_blocked', esc_html(self::rejection_message($listed)), 403);
+            }
+
+            return;
+        }
         $assessment = self::evaluate($data, self::order_product_ids($order), true);
         if ($assessment['action'] === 'block' && class_exists('Automattic\\WooCommerce\\StoreApi\\Exceptions\\RouteException')) {
             throw new RouteException(
@@ -148,9 +164,14 @@ class Fraud
      */
     public static function evaluate($data, $product_ids = [], $count_attempt = true)
     {
+        $raw_phone = sanitize_text_field((string) ($data['billing_phone'] ?? $data['phone'] ?? ''));
+        $listed = self::blocklist_assessment($raw_phone, (string) ($data['billing_country'] ?? $data['country'] ?? ''), $count_attempt);
+        if ($listed !== null) {
+            return $listed;
+        }
+
         $score = 0;
         $signals = [];
-        $raw_phone = sanitize_text_field((string) ($data['billing_phone'] ?? $data['phone'] ?? ''));
         $phone = self::normalize_phone($raw_phone);
         $email = sanitize_email((string) ($data['billing_email'] ?? $data['email'] ?? ''));
         $agent = strtolower(sanitize_text_field(wp_unslash((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''))));
@@ -197,6 +218,40 @@ class Fraud
             'score' => $score,
             'action' => $action,
             'signals' => array_values(array_unique($signals)),
+        ];
+    }
+
+    /**
+     * Block outright when the phone, IP or device is on the workspace
+     * blocklist. Set directly, not through the score, so changing risk
+     * thresholds never weakens an explicit block.
+     *
+     * @param  string  $raw_phone  Billing phone as entered.
+     * @param  string  $country  Billing country.
+     * @param  bool  $report  Report the stopped attempt to Adoology.
+     * @return array|null
+     */
+    public static function blocklist_assessment($raw_phone, $country, $report)
+    {
+        if (!Blocklist::enabled()) {
+            return null;
+        }
+        $matches = Blocklist::match(
+            Blocklist::client_ip(),
+            Blocklist::normalize_phone(sanitize_text_field((string) $raw_phone), sanitize_text_field((string) $country)),
+            Device::from_cookie()
+        );
+        if (empty($matches)) {
+            return null;
+        }
+        if ($report) {
+            Blocklist::report_hit($matches);
+        }
+
+        return [
+            'score' => 100,
+            'action' => 'block',
+            'signals' => array_values(array_unique(array_map(static fn ($match) => 'blocklist_' . $match['type'], $matches))),
         ];
     }
 

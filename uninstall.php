@@ -46,7 +46,7 @@ function adoology_uninstall_site()
         }
     }
 
-    foreach (['adoology_connection_health_check', 'adoology_webhook_retry', 'adoology_process_events', 'adoology_cleanup_events', 'adoology_incomplete_order_lifecycle', 'adoology_complete_checkout'] as $hook) {
+    foreach (['adoology_connection_health_check', 'adoology_webhook_retry', 'adoology_process_events', 'adoology_cleanup_events', 'adoology_incomplete_order_lifecycle', 'adoology_complete_checkout', 'adoology_blocklist_refresh'] as $hook) {
         if (class_exists(Scheduler::class)) {
             Scheduler::unschedule_hook($hook);
         } else {
@@ -79,6 +79,9 @@ function adoology_uninstall_site()
         'adoology_fraud_flag_threshold',
         'adoology_fraud_hold_threshold',
         'adoology_fraud_block_threshold',
+        'adoology_blocklist_enabled',
+        'adoology_ip_source',
+        'adoology_blocklist',
         'adoology_order_form_enabled',
         'adoology_connection_id',
         'adoology_webhook_secret',

@@ -234,7 +234,7 @@ class OrderForm
             'phone' => $phone,
             'email' => $email,
             'honeypot' => sanitize_text_field(wp_unslash($_POST['adoology_website'] ?? '')),
-        ], [$product_id], true) : ['score' => 0, 'action' => 'allow', 'signals' => []];
+        ], [$product_id], true) : (Fraud::blocklist_assessment($phone, '', true) ?? ['score' => 0, 'action' => 'allow', 'signals' => []]);
         if ($risk['action'] === 'block') {
             Events::enqueue('order.blocked', $identity['anonymous_id'], $identity['session_id'], [
                 'product_id' => $product_id,
@@ -312,6 +312,7 @@ class OrderForm
             $order->add_item($shipping);
             $order->update_meta_data('_adoology_delivery_option', $delivery_option);
             $order->update_meta_data('_adoology_checkout_id', $checkout_id);
+            Device::attach($order);
             if (Fraud::enabled()) {
                 Fraud::store_order_assessment($order, $risk);
             }
