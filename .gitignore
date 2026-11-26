@@ -4,3 +4,5 @@
 /phpunit.xml
 /.phpunit.cache/
 /composer.phar
+/review.md
+/plugin-check-report-*.md
