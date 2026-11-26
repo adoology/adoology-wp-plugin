@@ -25,22 +25,10 @@ parameters:
           path: src/Fraud.php
         - identifier: argument.type
           path: src/IncompleteOrders.php
-        - identifier: argument.type
-          path: src/Webhooks.php
         - message: '#Call to an undefined method WC_Order_Item::get_product_id#'
           path: src/Fraud.php
         - message: '#Call to an undefined method WC_Product::get_variation_attributes#'
           path: src/OrderForm.php
-        - message: '#invoked with 1 parameter, 0 required#'
-          path: src/Webhooks.php
-        - message: '#Call to function is_wp_error\(\) with non-empty-array#'
-          path: src/Webhooks.php
-        # Dormant legacy implementation (see README) referencing a Connection
-        # API surface that was never shipped.
-        - identifier: staticMethod.notFound
-          path: src/Webhooks.php
-        - identifier: classConstant.notFound
-          path: src/Webhooks.php
         # Test fixtures keep option arrays as dynamic in-memory stores.
         - message: '#Call to function array_key_exists\(\) with mixed and array\{\} will always evaluate to false#'
           path: tests/Unit/OptionsTest.php

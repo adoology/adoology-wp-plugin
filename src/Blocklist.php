@@ -176,20 +176,41 @@ class Blocklist
         $source = (string) Options::get('adoology_ip_source', 'remote_addr');
         $candidates = [];
         if ($source === 'cf-connecting-ip') {
-            $candidates[] = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? '';
+            $candidates[] = isset($_SERVER['HTTP_CF_CONNECTING_IP']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_CF_CONNECTING_IP'])) : '';
         } elseif ($source === 'x-forwarded-for') {
-            $forwarded = explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''));
-            $candidates[] = $forwarded[0] ?? '';
+            $candidates[] = self::forwarded_client_ip(isset($_SERVER['HTTP_X_FORWARDED_FOR']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR'])) : '');
         }
-        $candidates[] = $_SERVER['REMOTE_ADDR'] ?? '';
+        $candidates[] = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : '';
         foreach ($candidates as $candidate) {
-            $ip = self::canonical_ip(sanitize_text_field(wp_unslash((string) $candidate)));
+            $ip = self::canonical_ip((string) $candidate);
             if ($ip !== '') {
                 return $ip;
             }
         }
 
         return '';
+    }
+
+    /**
+     * Client address from an X-Forwarded-For chain.
+     *
+     * The leftmost entries are whatever the browser sent and can be forged;
+     * each proxy appends the address it saw. Walk from the right and take the
+     * first public address, skipping private hops such as internal balancers.
+     *
+     * @param  string  $header  Raw header value.
+     * @return string
+     */
+    public static function forwarded_client_ip($header)
+    {
+        $hops = array_reverse(array_filter(array_map(static fn ($hop) => self::canonical_ip(sanitize_text_field(wp_unslash((string) $hop))), explode(',', (string) $header))));
+        foreach ($hops as $hop) {
+            if (filter_var($hop, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                return $hop;
+            }
+        }
+
+        return (string) ($hops[0] ?? '');
     }
 
     /**
@@ -248,18 +269,24 @@ class Blocklist
     }
 
     /**
-     * Warn admins when the list has not refreshed for a day.
+     * Warn admins on Adoology screens when the list has not refreshed for a day.
      */
     public static function stale_notice()
     {
         if (!self::enabled() || !Connection::is_connected() || !current_user_can('manage_woocommerce')) {
             return;
         }
-        $fetched_at = self::summary()['fetched_at'];
-        if ($fetched_at > 0 && time() - $fetched_at < self::STALE_AFTER) {
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        if (!$screen || strpos((string) $screen->id, 'adoology') === false) {
             return;
         }
-        echo '<div class="notice notice-warning"><p>' . esc_html__('Adoology could not refresh the blocklist for over a day. Checkout still uses the last copy. Check the connection on Adoology → Connection.', 'adoology-for-woocommerce') . '</p></div>';
+        $fetched_at = self::summary()['fetched_at'];
+        $connected_at = strtotime((string) Options::get('adoology_connected_at', ''));
+        $since = $fetched_at > 0 ? $fetched_at : (int) $connected_at;
+        if ($since <= 0 || time() - $since < self::STALE_AFTER) {
+            return;
+        }
+        echo '<div class="notice notice-warning is-dismissible"><p>' . esc_html__('Adoology could not refresh the blocklist for over a day. Checkout still uses the last copy. Check the connection on Adoology → Connection.', 'adoology-for-woocommerce') . '</p></div>';
     }
 
     /**

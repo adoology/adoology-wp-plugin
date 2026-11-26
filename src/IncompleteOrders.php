@@ -40,6 +40,8 @@ class IncompleteOrders
 
     const COMPLETION_HOOK = 'adoology_complete_checkout';
 
+    const COMPLETION_MAX_ATTEMPTS = 10;
+
     /**
      * Register tracking and conversion hooks.
      */
@@ -62,7 +64,9 @@ class IncompleteOrders
     }
 
     /**
-     * Register public same-site capture endpoint.
+     * Register public same-site capture endpoints. Shoppers are anonymous, so
+     * access is public; each request is checked for same origin, a signed page
+     * context, a signed short-lived token, and rate limits inside the callback.
      */
     public static function register_routes()
     {
@@ -383,7 +387,7 @@ class IncompleteOrders
         if (self::accepted_order_id($checkout_id)) {
             return false;
         }
-        $existing = $wpdb->get_row($wpdb->prepare("SELECT id, status, form_stage, customer_data, product_id, variation_id, quantity, value_minor, currency, flow FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
+        $existing = $wpdb->get_row($wpdb->prepare('SELECT id, status, form_stage, customer_data, product_id, variation_id, quantity, value_minor, currency, flow FROM %i WHERE checkout_id = %s', $table, $checkout_id), ARRAY_A);
         if ($existing && in_array($existing['status'], ['converted', 'recovered', 'expired'], true)) {
             return false;
         }
@@ -629,7 +633,7 @@ class IncompleteOrders
         $contact = [];
         $fields = ['name' => ['first_name', 'last_name'], 'phone' => ['phone'], 'email' => ['email'], 'address' => ['address_1', 'address_2'], 'city' => ['city'], 'postcode' => ['postcode'], 'country' => ['country']];
         $incomplete_table = Database::incomplete_table();
-        $stored = $wpdb->get_var($wpdb->prepare("SELECT customer_data FROM {$incomplete_table} WHERE checkout_id = %s", $identity['checkout_id']));
+        $stored = $wpdb->get_var($wpdb->prepare('SELECT customer_data FROM %i WHERE checkout_id = %s', $incomplete_table, $identity['checkout_id']));
         $previous = self::customer_payload((string) $stored, $identity['checkout_id']);
         $billing_contact = !empty($previous['_billing_contact']) || $billing_name !== '' || $customer->get_billing_phone() !== '' || $billing_address !== '';
         $default_billing = !$billing_contact;
@@ -683,7 +687,7 @@ class IncompleteOrders
                     return true;
                 }
                 $table = Database::incomplete_table();
-                $row = $wpdb->get_row($wpdb->prepare("SELECT id, status, session_id, customer_data FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
+                $row = $wpdb->get_row($wpdb->prepare('SELECT id, status, session_id, customer_data FROM %i WHERE checkout_id = %s', $table, $checkout_id), ARRAY_A);
 
                 // A stored checkout only links to an order submitted with its
                 // own identity; a known UUID alone must not hijack someone
@@ -757,6 +761,11 @@ class IncompleteOrders
         }
         if (is_wp_error($result)) {
             // Cleanup must not turn an accepted payment into a failed checkout.
+            if ((int) $attempt >= self::COMPLETION_MAX_ATTEMPTS) {
+                Logger::log('error', 'Checkout cleanup gave up after repeated failures.', ['order_id' => (int) $order_id]);
+
+                return;
+            }
             Logger::log('error', 'Checkout cleanup will be retried.', ['order_id' => (int) $order_id]);
             Scheduler::schedule_single(time() + MINUTE_IN_SECONDS, self::COMPLETION_HOOK, [$checkout_id, (int) $order_id, null, (int) $attempt + 1]);
         }
@@ -815,7 +824,7 @@ class IncompleteOrders
         $table = Database::incomplete_table();
         $timeout = min(1440, max(5, (int) Options::get('adoology_incomplete_timeout_minutes', 30))) * MINUTE_IN_SECONDS;
         $wpdb->query($wpdb->prepare(
-            "UPDATE {$table} SET status = CASE WHEN status = 'submitting_recovery' THEN 'incomplete' ELSE 'started' END, updated_at = %s WHERE status IN ('submitting','submitting_recovery') AND order_id = 0 AND updated_at < %s",
+            "UPDATE %i SET status = CASE WHEN status = 'submitting_recovery' THEN 'incomplete' ELSE 'started' END, updated_at = %s WHERE status IN ('submitting','submitting_recovery') AND order_id = 0 AND updated_at < %s", $table,
             gmdate('Y-m-d H:i:s'),
             gmdate('Y-m-d H:i:s', time() - 15 * MINUTE_IN_SECONDS)
         ));
@@ -823,7 +832,7 @@ class IncompleteOrders
         $has_more = false;
         for ($batch = 0; $batch < self::LIFECYCLE_MAX_BATCHES; $batch++) {
             $rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT id, checkout_id, session_id, flow, product_id, variation_id, quantity, value_minor, currency, form_stage, customer_data FROM {$table} WHERE status = 'started' AND last_activity_at < %s LIMIT %d",
+                "SELECT id, checkout_id, session_id, flow, product_id, variation_id, quantity, value_minor, currency, form_stage, customer_data FROM %i WHERE status = 'started' AND last_activity_at < %s LIMIT %d", $table,
                 $cutoff,
                 self::LIFECYCLE_BATCH_SIZE
             ), ARRAY_A);
@@ -846,7 +855,7 @@ class IncompleteOrders
         $now = gmdate('Y-m-d H:i:s');
         for ($batch = 0; $batch < self::LIFECYCLE_MAX_BATCHES; $batch++) {
             $rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT id, checkout_id, session_id, status, flow, product_id, variation_id, quantity, value_minor, currency, form_stage, customer_data FROM {$table} WHERE status IN ('started','incomplete') AND expires_at < %s LIMIT %d",
+                "SELECT id, checkout_id, session_id, status, flow, product_id, variation_id, quantity, value_minor, currency, form_stage, customer_data FROM %i WHERE status IN ('started','incomplete') AND expires_at < %s LIMIT %d", $table,
                 $now,
                 self::LIFECYCLE_BATCH_SIZE
             ), ARRAY_A);
@@ -940,7 +949,7 @@ class IncompleteOrders
             return ['claimed' => false, 'order_id' => $order_id];
         }
         $table = Database::incomplete_table();
-        $row = $wpdb->get_row($wpdb->prepare("SELECT id, status, order_id FROM {$table} WHERE checkout_id = %s", $checkout_id), ARRAY_A);
+        $row = $wpdb->get_row($wpdb->prepare('SELECT id, status, order_id FROM %i WHERE checkout_id = %s', $table, $checkout_id), ARRAY_A);
         if (!$row) {
             return new WP_Error('adoology_checkout_missing', __('Checkout could not be prepared.', 'adoology-for-woocommerce'));
         }
@@ -967,7 +976,7 @@ class IncompleteOrders
 
         $table = Database::incomplete_table();
         $wpdb->query($wpdb->prepare(
-            "UPDATE {$table} SET status = CASE WHEN status = 'submitting_recovery' THEN 'incomplete' ELSE 'started' END, updated_at = %s WHERE checkout_id = %s AND status IN ('submitting','submitting_recovery') AND order_id = 0",
+            "UPDATE %i SET status = CASE WHEN status = 'submitting_recovery' THEN 'incomplete' ELSE 'started' END, updated_at = %s WHERE checkout_id = %s AND status IN ('submitting','submitting_recovery') AND order_id = 0", $table,
             gmdate('Y-m-d H:i:s'),
             $checkout_id
         ));
@@ -1054,7 +1063,7 @@ class IncompleteOrders
         }
         $incomplete_table = Database::incomplete_table();
         $row = $wpdb->get_row($wpdb->prepare(
-            "SELECT session_id, customer_data FROM {$incomplete_table} WHERE checkout_id = %s",
+            'SELECT session_id, customer_data FROM %i WHERE checkout_id = %s', $incomplete_table,
             $checkout_id
         ), ARRAY_A);
         $customer = is_array($row) ? self::customer_payload((string) $row['customer_data'], $checkout_id) : [];
@@ -1143,19 +1152,17 @@ class IncompleteOrders
     }
 
     /**
-     * Trust direct peer address only.
+     * Visitor IP from the configured source (direct, Cloudflare, or proxy).
      *
      * @return string
      */
     public static function client_ip()
     {
-        $ip = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : '';
-
-        return filter_var($ip, FILTER_VALIDATE_IP) ? $ip : '';
+        return Blocklist::client_ip();
     }
 
     /**
-     * Stable request limiter subject without trusting forwarded IP headers.
+     * Stable request limiter subject.
      * Logged-in customers bind to their account id; otherwise the client IP
      * is preferred so clearing cookies cannot reset the component, and
      * cookie-backed identifiers are last resorts.
@@ -1311,7 +1318,7 @@ class IncompleteOrders
 
         return [
             'items_removed' => $removed,
-            'items_retained' => $removed,
+            'items_retained' => false,
             'messages' => $removed ? [__('Local data was erased. Data already delivered to Adoology must be erased from the connected workspace separately.', 'adoology-for-woocommerce')] : [],
             'done' => $matches['done'],
         ];
@@ -1321,7 +1328,7 @@ class IncompleteOrders
     {
         global $wpdb;
         $incomplete_table = Database::incomplete_table();
-        $payload = $wpdb->get_var($wpdb->prepare("SELECT customer_data FROM {$incomplete_table} WHERE checkout_id = %s", $checkout_id));
+        $payload = $wpdb->get_var($wpdb->prepare('SELECT customer_data FROM %i WHERE checkout_id = %s', $incomplete_table, $checkout_id));
         if ($payload) {
             $decrypted = Crypto::decrypt($payload, 'adoology_checkout_' . $checkout_id);
             $data = is_wp_error($decrypted) ? null : json_decode($decrypted, true);
@@ -1577,16 +1584,21 @@ class IncompleteOrders
         global $wpdb;
 
         $table = Database::incomplete_table();
-        $condition = $group === 'expired'
-            ? "status = 'expired' AND expires_at < %s"
-            : "status IN ('converted','recovered') AND updated_at < %s";
         $has_more = false;
         for ($batch = 0; $batch < self::LIFECYCLE_MAX_BATCHES; $batch++) {
-            $rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT id, checkout_id, status, customer_data FROM {$table} WHERE {$condition} ORDER BY id ASC LIMIT %d",
-                $cutoff,
-                self::LIFECYCLE_BATCH_SIZE
-            ), ARRAY_A);
+            $rows = $group === 'expired'
+                ? $wpdb->get_results($wpdb->prepare(
+                    "SELECT id, checkout_id, status, customer_data FROM %i WHERE status = 'expired' AND expires_at < %s ORDER BY id ASC LIMIT %d",
+                    $table,
+                    $cutoff,
+                    self::LIFECYCLE_BATCH_SIZE
+                ), ARRAY_A)
+                : $wpdb->get_results($wpdb->prepare(
+                    "SELECT id, checkout_id, status, customer_data FROM %i WHERE status IN ('converted','recovered') AND updated_at < %s ORDER BY id ASC LIMIT %d",
+                    $table,
+                    $cutoff,
+                    self::LIFECYCLE_BATCH_SIZE
+                ), ARRAY_A);
             foreach ($rows as $row) {
                 $customer = self::customer_payload((string) $row['customer_data'], (string) $row['checkout_id']);
                 $anonymous_id = is_string($customer['anonymous_id'] ?? null) ? $customer['anonymous_id'] : '';
@@ -1610,7 +1622,7 @@ class IncompleteOrders
 
         $table = Database::events_table();
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT id, event_id, payload FROM {$table} WHERE anonymous_id = %s",
+            'SELECT id, event_id, payload FROM %i WHERE anonymous_id = %s', $table,
             $anonymous_id
         ), ARRAY_A);
         foreach ($rows as $row) {
@@ -1681,18 +1693,18 @@ class IncompleteOrders
         $incomplete_table = Database::incomplete_table();
         if ($limit > 0 && $after_id > 0) {
             $rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT * FROM {$incomplete_table} WHERE customer_data <> '' AND id > %d ORDER BY id ASC LIMIT %d",
+                "SELECT * FROM %i WHERE customer_data <> '' AND id > %d ORDER BY id ASC LIMIT %d", $incomplete_table,
                 $after_id,
                 $limit
             ), ARRAY_A);
         } elseif ($limit > 0) {
             $rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT * FROM {$incomplete_table} WHERE customer_data <> '' ORDER BY id ASC LIMIT %d OFFSET %d",
+                "SELECT * FROM %i WHERE customer_data <> '' ORDER BY id ASC LIMIT %d OFFSET %d", $incomplete_table,
                 $limit,
                 max(0, ((int) $page - 1) * $limit)
             ), ARRAY_A);
         } else {
-            $rows = $wpdb->get_results("SELECT * FROM {$incomplete_table} WHERE customer_data <> '' ORDER BY id ASC", ARRAY_A);
+            $rows = $wpdb->get_results($wpdb->prepare("SELECT * FROM %i WHERE customer_data <> '' ORDER BY id ASC", $incomplete_table), ARRAY_A);
         }
         $matches = [];
         foreach ($rows as $row) {
@@ -1721,7 +1733,7 @@ class IncompleteOrders
         }
         $events_table = Database::events_table();
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT event_id, payload FROM {$events_table} WHERE anonymous_id = %s ORDER BY id ASC",
+            'SELECT event_id, payload FROM %i WHERE anonymous_id = %s ORDER BY id ASC', $events_table,
             $anonymous_id
         ), ARRAY_A);
         $events = [];
@@ -1744,6 +1756,11 @@ class IncompleteOrders
     private static function current_url()
     {
         $path = isset($_SERVER['REQUEST_URI']) ? esc_url_raw(wp_unslash($_SERVER['REQUEST_URI'])) : '/';
+        // REQUEST_URI already contains the install subdirectory that home_url() adds.
+        $home_path = untrailingslashit((string) wp_parse_url(home_url(), PHP_URL_PATH));
+        if ($home_path !== '' && strpos($path, $home_path . '/') === 0) {
+            $path = substr($path, strlen($home_path));
+        }
 
         return home_url($path);
     }

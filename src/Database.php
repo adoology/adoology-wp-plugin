@@ -28,9 +28,9 @@ class Database
 
         self::maybe_create_tables($wpdb, $charset_collate, $events, $incomplete);
 
-        $retention_index = $wpdb->get_var($wpdb->prepare("SHOW INDEX FROM {$incomplete} WHERE Key_name = %s", 'retention'));
+        $retention_index = $wpdb->get_var($wpdb->prepare('SHOW INDEX FROM %i WHERE Key_name = %s', $incomplete, 'retention'));
         if (!$retention_index) {
-            $wpdb->query("ALTER TABLE {$incomplete} ADD KEY retention (status, updated_at)");
+            $wpdb->query($wpdb->prepare('ALTER TABLE %i ADD KEY retention (status, updated_at)', $incomplete));
         }
 
         // Only advance the recorded version once both tables provably

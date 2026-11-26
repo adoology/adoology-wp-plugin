@@ -299,7 +299,7 @@ class Settings
     }
 
     /**
-     * Retry dead-letter and retrying event rows.
+     * Download the workspace blocklist now.
      */
     public function handle_sync_blocklist()
     {
@@ -320,13 +320,16 @@ class Settings
         return in_array($value, ['remote_addr', 'cf-connecting-ip', 'x-forwarded-for'], true) ? $value : 'remote_addr';
     }
 
+    /**
+     * Retry dead-letter and retrying event rows.
+     */
     public function handle_retry_events()
     {
         global $wpdb;
 
         $this->authorize_action('adoology_retry_events');
         $events_table = Database::events_table();
-        $wpdb->query("UPDATE {$events_table} SET status = 'pending', attempts = 0, available_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE status IN ('failed','retrying')");
+        $wpdb->query($wpdb->prepare("UPDATE %i SET status = 'pending', attempts = 0, available_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE status IN ('failed','retrying')", $events_table));
         Events::schedule_processing();
         $this->redirect_with_result('adoology_retry', true);
     }
@@ -406,7 +409,7 @@ class Settings
                     <tr>
                         <th scope="row"><label for="adoology_api_token"><?php esc_html_e('Workspace API Key', 'adoology-for-woocommerce'); ?></label></th>
                         <td>
-                            <input name="adoology_api_token" id="adoology_api_token" type="password" class="regular-text" value="" autocomplete="new-password" maxlength="512" placeholder="<?php echo $token_set ? esc_attr__('Key saved; leave blank to keep it', 'adoology-for-woocommerce') : 'dc_...'; ?>" />
+                            <input name="adoology_api_token" id="adoology_api_token" type="password" class="regular-text" value="" autocomplete="new-password" maxlength="512" placeholder="<?php echo $token_set ? esc_attr__('Key saved; leave blank to keep it', 'adoology-for-woocommerce') : esc_attr('dc_...'); ?>" />
                             <p class="description"><?php esc_html_e('Stored encrypted. Existing keys are never rendered into HTML.', 'adoology-for-woocommerce'); ?></p>
                         </td>
                     </tr>
@@ -449,8 +452,8 @@ class Settings
         $state = is_array($state) ? $state : [];
         $events_table = Database::events_table();
         $incomplete_table = Database::incomplete_table();
-        $events = $wpdb->get_results("SELECT status, COUNT(*) AS total FROM {$events_table} GROUP BY status", OBJECT_K);
-        $incomplete = $wpdb->get_results("SELECT status, COUNT(*) AS total FROM {$incomplete_table} GROUP BY status", OBJECT_K);
+        $events = $wpdb->get_results($wpdb->prepare('SELECT status, COUNT(*) AS total FROM %i GROUP BY status', $events_table), OBJECT_K);
+        $incomplete = $wpdb->get_results($wpdb->prepare('SELECT status, COUNT(*) AS total FROM %i GROUP BY status', $incomplete_table), OBJECT_K);
         $risk_orders = wc_get_orders([
             'limit' => 1,
             'paginate' => true,
@@ -531,7 +534,8 @@ class Settings
         global $wpdb;
 
         $this->guard_page();
-        $detail_id = isset($_GET['detail']) ? absint($_GET['detail']) : 0;
+        // Read-only view selector on a capability-checked page; nothing is changed.
+        $detail_id = isset($_GET['detail']) ? absint($_GET['detail']) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         if ($detail_id > 0) {
             $this->render_incomplete_detail($detail_id);
 
@@ -539,7 +543,7 @@ class Settings
         }
 
         $incomplete_table = Database::incomplete_table();
-        $rows = $wpdb->get_results("SELECT * FROM {$incomplete_table} ORDER BY updated_at DESC LIMIT 100", ARRAY_A);
+        $rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM %i ORDER BY updated_at DESC LIMIT 100', $incomplete_table), ARRAY_A);
         ?>
         <div class="wrap"><h1><?php esc_html_e('Incomplete Orders', 'adoology-for-woocommerce'); ?></h1>
             <p><?php esc_html_e('Checkout and landing-page starts are marked incomplete after the configured inactivity window. Records are read-only here; contact, recovery, and order creation are managed in Adoology.', 'adoology-for-woocommerce'); ?></p>
@@ -563,7 +567,7 @@ class Settings
         global $wpdb;
 
         $incomplete_table = Database::incomplete_table();
-        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$incomplete_table} WHERE id = %d", $id), ARRAY_A);
+        $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE id = %d', $incomplete_table, $id), ARRAY_A);
         if (!$row) {
             echo '<div class="wrap"><h1>' . esc_html__('Incomplete Orders', 'adoology-for-woocommerce') . '</h1><div class="notice notice-error inline"><p>' . esc_html__('Record not found.', 'adoology-for-woocommerce') . '</p></div><p><a class="button" href="' . esc_url(admin_url('admin.php?page=adoology-incomplete')) . '">' . esc_html__('Back to list', 'adoology-for-woocommerce') . '</a></p></div>';
 
@@ -619,7 +623,8 @@ class Settings
         ]);
         ?>
         <div class="wrap"><h1><?php esc_html_e('Fraud Protection', 'adoology-for-woocommerce'); ?></h1>
-            <p><?php esc_html_e('Signals use direct IP velocity, duplicate contacts/products, invalid contact data, suspicious user agents, and a server-side honeypot. Orders from a contact that already ordered within the hard-block window are rejected outright.', 'adoology-for-woocommerce'); ?></p>
+            <?php $this->render_action_notice(); ?>
+            <p><?php esc_html_e('Signals use visitor IP velocity, duplicate contacts/products, invalid contact data, suspicious user agents, and a server-side honeypot. Orders from a contact that already ordered within the hard-block window are rejected outright.', 'adoology-for-woocommerce'); ?></p>
             <p><strong><?php esc_html_e('Actions:', 'adoology-for-woocommerce'); ?></strong> <?php printf(
                 /* translators: 1: flag threshold, 2: hold threshold, 3: block threshold. */
                 esc_html__('Flag at %1$d, hold at %2$d, block at %3$d.', 'adoology-for-woocommerce'),
@@ -719,7 +724,7 @@ class Settings
 
         $this->guard_page();
         $events_table = Database::events_table();
-        $rows = $wpdb->get_results("SELECT event_id, event_name, status, attempts, last_error, created_at, sent_at FROM {$events_table} ORDER BY id DESC LIMIT 100", ARRAY_A);
+        $rows = $wpdb->get_results($wpdb->prepare('SELECT event_id, event_name, status, attempts, last_error, created_at, sent_at FROM %i ORDER BY id DESC LIMIT 100', $events_table), ARRAY_A);
         ?>
         <div class="wrap"><h1><?php esc_html_e('Adoology Logs', 'adoology-for-woocommerce'); ?></h1><?php $this->render_action_notice(); ?>
             <form class="adoology-log-actions" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>"><?php wp_nonce_field('adoology_retry_events'); ?><input type="hidden" name="action" value="adoology_retry_events" /><?php submit_button(__('Retry Failed Events', 'adoology-for-woocommerce'), 'secondary', 'submit', false); ?></form>

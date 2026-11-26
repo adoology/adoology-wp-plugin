@@ -25,6 +25,7 @@ class OrderFormFallbackIdTest extends TestCase
     {
         when('wp_salt')->justReturn('fallback-secret');
         when('wp_unslash')->returnArg();
+        when('get_option')->alias(fn ($name, $default = false) => $default);
         when('sanitize_text_field')->returnArg();
         IncompleteOrders::client_ip();
 

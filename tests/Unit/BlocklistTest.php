@@ -129,6 +129,20 @@ class BlocklistTest extends TestCase
     }
 
     /**
+     * @covers ::forwarded_client_ip
+     */
+    public function test_forwarded_ip_ignores_forged_leftmost_entries()
+    {
+        when('sanitize_text_field')->returnArg();
+        when('wp_unslash')->returnArg();
+
+        $this->assertSame('59.153.202.48', Blocklist::forwarded_client_ip('1.2.3.4, 59.153.202.48'));
+        $this->assertSame('59.153.202.48', Blocklist::forwarded_client_ip('1.2.3.4, 59.153.202.48, 10.0.0.5'));
+        $this->assertSame('10.0.0.5', Blocklist::forwarded_client_ip('10.0.0.5'));
+        $this->assertSame('', Blocklist::forwarded_client_ip(''));
+    }
+
+    /**
      * @covers ::client_ip
      */
     public function test_reads_the_cloudflare_header_only_when_configured()

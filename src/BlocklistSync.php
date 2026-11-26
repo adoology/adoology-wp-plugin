@@ -33,18 +33,17 @@ class BlocklistSync
         register_rest_route('adoology/v1', '/blocklist-sync', [
             'methods' => WP_REST_Server::CREATABLE,
             'callback' => [self::class, 'handle'],
-            'permission_callback' => '__return_true',
+            'permission_callback' => [self::class, 'verify_request'],
         ]);
     }
 
     /**
-     * Verify the signature and schedule a download. The body carries no
-     * blocklist data, so nothing in it is trusted beyond "go refresh".
+     * Allow only requests signed by Adoology with this store's connection secret.
      *
      * @param  WP_REST_Request  $request  Request.
-     * @return WP_REST_Response|WP_Error
+     * @return true|WP_Error
      */
-    public static function handle($request)
+    public static function verify_request($request)
     {
         $raw = (string) $request->get_body();
         $signature = strtolower((string) $request->get_header('X-Adoology-Signature'));
@@ -61,6 +60,23 @@ class BlocklistSync
             return new WP_Error('adoology_blocklist_sync_invalid', __('Invalid blocklist sync request.', 'adoology-for-woocommerce'), ['status' => 401]);
         }
 
+        return true;
+    }
+
+    /**
+     * Schedule a download. The body carries no blocklist data, so nothing in
+     * it is trusted beyond "go refresh".
+     *
+     * @param  WP_REST_Request  $request  Request verified by verify_request().
+     * @return WP_REST_Response|WP_Error
+     */
+    public static function handle($request)
+    {
+        $verified = self::verify_request($request);
+        if (is_wp_error($verified)) {
+            return $verified;
+        }
+        $signature = strtolower((string) $request->get_header('X-Adoology-Signature'));
         $replay_key = 'adoology_blocklist_sync_' . hash('sha256', $signature);
         if (!get_transient($replay_key)) {
             set_transient($replay_key, 1, 10 * MINUTE_IN_SECONDS);
