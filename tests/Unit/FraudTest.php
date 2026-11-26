@@ -177,7 +177,7 @@ class FraudTest extends TestCase
         $this->assertSame(100, $result['score']);
         $this->assertSame('block', $result['action']);
         $this->assertContains('duplicate_order_block', $result['signals']);
-        $this->assertSame(['pending', 'processing', 'on-hold', 'completed'], $captured[0]['status']);
+        $this->assertSame(['processing', 'on-hold', 'completed'], $captured[0]['status']);
         $this->assertStringStartsWith('>', $captured[0]['date_created']);
         $this->assertEqualsWithDelta(time() - 300, (int) substr($captured[0]['date_created'], 1), 5);
     }
@@ -265,6 +265,29 @@ class FraudTest extends TestCase
         $message = Fraud::rejection_message(['signals' => ['honeypot']]);
 
         $this->assertStringContainsStringIgnoringCase('contact the store', $message);
+    }
+
+    /**
+     * @covers ::hold_paid_order_status
+     */
+    public function test_paid_risk_held_order_stays_on_hold()
+    {
+        $order = Mockery::mock('WC_Order');
+        $order->shouldReceive('get_meta')->with('_adoology_risk_action', true)->andReturn('hold');
+        $order->shouldReceive('add_order_note')->once();
+
+        $this->assertSame('on-hold', Fraud::hold_paid_order_status('processing', 10, $order));
+    }
+
+    /**
+     * @covers ::hold_cod_order_status
+     */
+    public function test_cod_order_without_hold_keeps_gateway_status()
+    {
+        $order = Mockery::mock('WC_Order');
+        $order->shouldReceive('get_meta')->with('_adoology_risk_action', true)->andReturn('flag');
+
+        $this->assertSame('processing', Fraud::hold_cod_order_status('processing', $order));
     }
 
     /**

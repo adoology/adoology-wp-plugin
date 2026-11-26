@@ -33,12 +33,25 @@ class KeyRevocation
         register_rest_route('adoology/v1', '/revoke-key', [
             'methods' => WP_REST_Server::CREATABLE,
             'callback' => [self::class, 'revoke'],
-            'permission_callback' => '__return_true',
+            'permission_callback' => [self::class, 'verify_request'],
         ]);
     }
 
     /**
-     * Verify backend signature and remove exact Woo API key.
+     * Allow only requests signed by Adoology with this store's connection secret.
+     *
+     * @param  WP_REST_Request  $request  Request.
+     * @return true|WP_Error
+     */
+    public static function verify_request($request)
+    {
+        $verified = self::verified_fields($request);
+
+        return is_wp_error($verified) ? $verified : true;
+    }
+
+    /**
+     * Remove the exact Woo API key named by a verified request.
      *
      * @param  WP_REST_Request  $request  Request.
      * @return WP_REST_Response|WP_Error
@@ -47,6 +60,42 @@ class KeyRevocation
     {
         global $wpdb;
 
+        $verified = self::verified_fields($request);
+        if (is_wp_error($verified)) {
+            return $verified;
+        }
+        $key_id = $verified['key_id'];
+        $consumer_key = $verified['consumer_key'];
+
+        $replay_key = 'adoology_revoke_' . hash('sha256', $verified['signature']);
+        if (get_transient($replay_key)) {
+            return new WP_REST_Response(null, 204);
+        }
+        $deleted = $wpdb->delete(
+            $wpdb->prefix . 'woocommerce_api_keys',
+            ['key_id' => $key_id, 'consumer_key' => $consumer_key],
+            ['%d', '%s']
+        );
+        $key_still_exists = $deleted === 0 && $wpdb->get_var($wpdb->prepare(
+            "SELECT key_id FROM {$wpdb->prefix}woocommerce_api_keys WHERE key_id = %d",
+            $key_id
+        )) !== null;
+        if ($deleted === false || $key_still_exists) {
+            return new WP_Error('adoology_revoke_failed', __('API key revocation failed.', 'adoology-for-woocommerce'), ['status' => 500]);
+        }
+        set_transient($replay_key, 1, 10 * MINUTE_IN_SECONDS);
+
+        return new WP_REST_Response(null, 204);
+    }
+
+    /**
+     * Validate the signed revocation payload.
+     *
+     * @param  WP_REST_Request  $request  Request.
+     * @return array{signature: string, key_id: int, consumer_key: string}|WP_Error
+     */
+    private static function verified_fields($request)
+    {
         $raw = (string) $request->get_body();
         $signature = strtolower((string) $request->get_header('X-Adoology-Signature'));
         $payload = json_decode($raw, true);
@@ -78,25 +127,7 @@ class KeyRevocation
             return new WP_Error('adoology_revoke_invalid', __('Invalid revocation signature.', 'adoology-for-woocommerce'), ['status' => 401]);
         }
 
-        $replay_key = 'adoology_revoke_' . hash('sha256', $signature);
-        if (get_transient($replay_key)) {
-            return new WP_REST_Response(null, 204);
-        }
-        $deleted = $wpdb->delete(
-            $wpdb->prefix . 'woocommerce_api_keys',
-            ['key_id' => $key_id, 'consumer_key' => $consumer_key],
-            ['%d', '%s']
-        );
-        $key_still_exists = $deleted === 0 && $wpdb->get_var($wpdb->prepare(
-            "SELECT key_id FROM {$wpdb->prefix}woocommerce_api_keys WHERE key_id = %d",
-            $key_id
-        )) !== null;
-        if ($deleted === false || $key_still_exists) {
-            return new WP_Error('adoology_revoke_failed', __('API key revocation failed.', 'adoology-for-woocommerce'), ['status' => 500]);
-        }
-        set_transient($replay_key, 1, 10 * MINUTE_IN_SECONDS);
-
-        return new WP_REST_Response(null, 204);
+        return ['signature' => $signature, 'key_id' => $key_id, 'consumer_key' => $consumer_key];
     }
 
     /**

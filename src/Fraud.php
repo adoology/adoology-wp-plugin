@@ -36,6 +36,8 @@ class Fraud
         add_action('woocommerce_store_api_checkout_update_order_from_request', [self::class, 'protect_store_api'], 30, 2);
         add_action('woocommerce_store_api_checkout_order_processed', [self::class, 'apply_store_api_action'], 40, 1);
         add_filter('woocommerce_order_needs_payment', [self::class, 'held_order_needs_payment'], 10, 2);
+        add_filter('woocommerce_payment_complete_order_status', [self::class, 'hold_paid_order_status'], 20, 3);
+        add_filter('woocommerce_cod_process_payment_order_status', [self::class, 'hold_cod_order_status'], 20, 2);
     }
 
     /**
@@ -99,7 +101,7 @@ class Fraud
     public static function apply_order_action($order_id, $posted, $order)
     {
         if ($order instanceof WC_Order) {
-            self::enforce_order_assessment($order);
+            self::enforce_order_assessment($order, false);
         }
     }
 
@@ -150,7 +152,7 @@ class Fraud
     public static function apply_store_api_action($order)
     {
         if ($order instanceof WC_Order) {
-            self::enforce_order_assessment($order);
+            self::enforce_order_assessment($order, false);
         }
     }
 
@@ -319,11 +321,43 @@ class Fraud
     }
 
     /**
+     * Keep a risk-held order on hold when a gateway completes its payment.
+     *
+     * Checkout payment runs after the order is assessed, and gateways move
+     * paid orders to processing; the hold is applied at that point instead.
+     *
+     * @param  string  $status  Status the gateway would set.
+     * @param  int  $order_id  Order ID.
+     * @param  WC_Order|null  $order  Order.
+     * @return string
+     */
+    public static function hold_paid_order_status($status, $order_id, $order = null)
+    {
+        $order = $order instanceof WC_Order ? $order : wc_get_order($order_id);
+
+        return self::held_status($status, $order);
+    }
+
+    /**
+     * Keep a risk-held cash-on-delivery order on hold.
+     *
+     * @param  string  $status  Status the gateway would set.
+     * @param  WC_Order  $order  Order.
+     * @return string
+     */
+    public static function hold_cod_order_status($status, $order)
+    {
+        return self::held_status($status, $order);
+    }
+
+    /**
      * Apply stored risk action and emit telemetry.
      *
      * @param  WC_Order  $order  Order.
+     * @param  bool  $hold_now  Put held orders on hold immediately. Checkout
+     *                          flows pass false and hold after payment instead.
      */
-    public static function enforce_order_assessment($order)
+    public static function enforce_order_assessment($order, $hold_now = true)
     {
         if (!self::enabled()) {
             return;
@@ -335,7 +369,7 @@ class Fraud
         $action = (string) $order->get_meta('_adoology_risk_action', true);
         $signals = json_decode((string) $order->get_meta('_adoology_risk_signals', true), true);
         $signals = is_array($signals) ? $signals : [];
-        if ($action === 'hold' && !in_array($order->get_status(), ['cancelled', 'refunded', 'completed'], true)) {
+        if ($hold_now && $action === 'hold' && !in_array($order->get_status(), ['cancelled', 'refunded', 'completed'], true)) {
             $order->update_status('on-hold', __('Held by Adoology local risk assessment.', 'adoology-for-woocommerce'));
         } elseif ($action === 'flag') {
             $order->add_order_note(__('Flagged by Adoology local risk assessment.', 'adoology-for-woocommerce'));
@@ -352,6 +386,26 @@ class Fraud
             $order->update_meta_data('_adoology_risk_event_sent', 'yes');
             $order->save_meta_data();
         }
+    }
+
+    /**
+     * On-hold instead of a paid status for orders the risk check held.
+     *
+     * @param  string  $status  Proposed status.
+     * @param  mixed  $order  Order.
+     * @return string
+     */
+    private static function held_status($status, $order)
+    {
+        if (!self::enabled() || !$order instanceof WC_Order || $order->get_meta('_adoology_risk_action', true) !== 'hold') {
+            return $status;
+        }
+        if (!in_array($status, ['processing', 'completed'], true)) {
+            return $status;
+        }
+        $order->add_order_note(__('Held by Adoology local risk assessment.', 'adoology-for-woocommerce'));
+
+        return 'on-hold';
     }
 
     private static function attempt_count($increment)
@@ -376,7 +430,9 @@ class Fraud
         $base_args = [
             'limit' => 10,
             'return' => 'objects',
-            'status' => ['pending', 'processing', 'on-hold', 'completed'],
+            // Pending orders are unpaid attempts (for example an abandoned
+            // redirect payment); counting them would block the retry.
+            'status' => ['processing', 'on-hold', 'completed'],
             'date_created' => '>' . (time() - $minutes * MINUTE_IN_SECONDS),
         ];
         $orders = [];
@@ -439,7 +495,9 @@ class Fraud
         $base_args = [
             'limit' => 1,
             'return' => 'ids',
-            'status' => ['pending', 'processing', 'on-hold', 'completed'],
+            // Pending orders are unpaid attempts (for example an abandoned
+            // redirect payment); counting them would block the retry.
+            'status' => ['processing', 'on-hold', 'completed'],
             'date_created' => '>' . (time() - $minutes * MINUTE_IN_SECONDS),
         ];
         foreach (array_values(array_unique(array_filter([$raw_phone, $phone]))) as $phone_value) {

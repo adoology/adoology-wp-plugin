@@ -1,11 +1,11 @@
 === Adoology for WooCommerce ===
 Contributors: adoology, amadulhaque8
 Tags: woocommerce, orders, ecommerce, fraud, automation
-Requires at least: 6.0
+Requires at least: 6.2
 Requires PHP: 7.4
 Requires Plugins: woocommerce
 Tested up to: 7.1
-Stable tag: 0.2.0
+Stable tag: 0.2.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -35,12 +35,15 @@ Data is sent under these conditions:
 
 * When a merchant selects Connect Store, the plugin sends the store name, store URL, WooCommerce REST API URL, timezone, currency, weight unit, plugin version, and synchronization settings. API requests use the saved workspace API key for authentication.
 * After the merchant approves WooCommerce's authorization screen, WooCommerce sends read/write API credentials and signed connection state to Adoology. Adoology uses that authorized access to import products, variations, inventory, customers, and orders, including customer names, contact details, billing/shipping addresses, purchased items, totals, and order status. Backend-managed WooCommerce webhooks deliver changes in these records to Adoology.
-* Connection checks run when requested and hourly while connected. Viewing the Sync page requests recent sync runs; selecting Sync Products Now requests a product import. These calls send the connection identifier and authentication headers. Disconnecting or uninstalling requests removal of the remote connection and its managed credentials/webhooks.
+* Connection checks run when requested and hourly while connected. Viewing the Sync page requests recent sync runs; selecting Sync Products Now requests a product import. These calls send the connection identifier and authentication headers.
+* Disconnecting or uninstalling deletes the Adoology WooCommerce webhooks and API keys from this store, so no further store data is sent to Adoology. Data already delivered stays in the Adoology workspace until it is deleted there.
 * Incomplete-order tracking is disabled by default. When enabled by the merchant, checkout activity queues events containing browser/checkout/session identifiers, available customer name, phone, email and address, product/variation identifiers, quantities, amounts, currency, landing page, form stage, timestamps, lifecycle status, and associated order identifiers. Events are delivered to the connected workspace by background jobs, including retries after failed delivery.
 * The workspace blocklist is enabled by default. Every five minutes, and when Adoology signals a change, the plugin downloads hashed blocked values (no raw phone numbers or IP addresses). When a checkout is refused because of it, the plugin queues an event with the matched block identifiers and types, the visitor's IP address and browser, and anonymous/session identifiers.
 * A first-party cookie, adoology_device_id, holds a random device identifier (also kept in the browser's localStorage). It is saved on new orders and compared with the blocklist.
 * Fraud protection is enabled by default. When an order is assessed, or an order-form submission is blocked, the plugin queues risk events containing order or product identifiers, risk score, action, and risk signals. These events can be delivered even when incomplete-order tracking is disabled.
-* Checkout and risk events include the request's direct IP address and user agent, plus anonymous/session identifiers. They are delivered only when a store connection and workspace API key are configured. Local encrypted checkout data and queued events follow the configured retention period; removing local data does not erase data already delivered to Adoology.
+* Checkout and risk events include the visitor's IP address (taken from the source chosen in Settings: direct connection, Cloudflare, or proxy) and user agent, plus anonymous/session identifiers. They are delivered only when a store connection and workspace API key are configured. Local encrypted checkout data and queued events follow the configured retention period; removing local data does not erase data already delivered to Adoology.
+
+Adoology privacy policy: https://adoology.com/privacy-policy
 
 The plugin bundles its CSS and JavaScript locally. Storefront tracking requests first go to the store's own WordPress REST API; server-side background jobs then deliver queued events to Adoology.
 
@@ -53,6 +56,15 @@ The plugin bundles its CSS and JavaScript locally. Storefront tracking requests 
 5. Review the store privacy policy and obtain any required consent before enabling incomplete-order tracking.
 
 == Changelog ==
+
+= 0.2.1 =
+* Delete Adoology WooCommerce webhooks on disconnect and uninstall so no store data is sent after removal.
+* Risk-held orders now stay on hold after payment, including cash on delivery.
+* Unpaid pending orders no longer block a customer from retrying checkout.
+* Velocity limits and event IP addresses use the configured visitor IP source; the proxy option no longer trusts forged X-Forwarded-For entries.
+* Show the blocklist warning only on Adoology screens.
+* Requires WordPress 6.2 or newer: database queries now pass table names as escaped identifiers.
+* Remove unused code.
 
 = 0.2.0 =
 * Enforce the Adoology workspace blocklist at checkout: blocked phones, IP addresses and devices are refused on classic checkout, block checkout and the order form before an order is created.

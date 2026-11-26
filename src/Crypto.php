@@ -194,19 +194,6 @@ class Crypto
     }
 
     /**
-     * Migrate one legacy plaintext option.
-     *
-     * @param  string  $option  Option name.
-     * @return true|WP_Error
-     */
-    public static function migrate_secret($option)
-    {
-        $value = self::get_secret($option);
-
-        return is_wp_error($value) ? $value : true;
-    }
-
-    /**
      * Derive a site- and context-specific key from WordPress salts.
      *
      * @param  string  $context  Storage context.

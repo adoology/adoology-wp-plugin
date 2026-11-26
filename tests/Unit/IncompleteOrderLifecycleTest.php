@@ -1475,7 +1475,19 @@ class IncompleteOrderLifecycleWpdb
 
     public function prepare($sql, ...$args)
     {
-        return (object) ['sql' => $sql, 'args' => $args];
+        // Inline %i identifiers so assertions read the real table name.
+        $values = [];
+        $sql = preg_replace_callback('/%[sdfi]/', static function ($match) use (&$args, &$values) {
+            $value = array_shift($args);
+            if ($match[0] === '%i') {
+                return $value;
+            }
+            $values[] = $value;
+
+            return $match[0];
+        }, $sql);
+
+        return (object) ['sql' => $sql, 'args' => $values];
     }
 
     public function get_var($query)

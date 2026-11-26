@@ -258,24 +258,6 @@ class ApiClient
     }
 
     /**
-     * Verify Woo credentials and webhooks.
-     *
-     * @param  string  $connection_id  Connection ID.
-     * @param  array  $webhooks  Webhook descriptors.
-     * @param  string  $idempotency_key  Stable key.
-     * @return array|WP_Error
-     */
-    public static function verify_connection($connection_id, $webhooks, $idempotency_key)
-    {
-        return self::request(
-            'POST',
-            '/channel-connections/' . rawurlencode((string) $connection_id) . '/verify',
-            ['webhooks' => $webhooks],
-            $idempotency_key
-        );
-    }
-
-    /**
      * Ingest generic storefront events.
      *
      * @param  array  $events  Event batch.

@@ -69,10 +69,15 @@ class OrderForm
      */
     public static function render_block($attributes)
     {
-        return self::shortcode([
+        $shortcode_attributes = [
             'product_id' => isset($attributes['productId']) ? (int) $attributes['productId'] : 0,
-            'title' => $attributes['title'] ?? '',
-        ]);
+        ];
+        // An empty block title must fall back to the default heading.
+        if (isset($attributes['title']) && trim((string) $attributes['title']) !== '') {
+            $shortcode_attributes['title'] = (string) $attributes['title'];
+        }
+
+        return self::shortcode($shortcode_attributes);
     }
 
     /**
@@ -103,7 +108,8 @@ class OrderForm
         ]);
         $gateways = self::enabled_gateways();
         $delivery = self::delivery_options($attributes['delivery_options']);
-        $error_token = isset($_GET['adoology_form_error']) ? sanitize_key(wp_unslash($_GET['adoology_form_error'])) : '';
+        // Opaque one-time token that only selects a message to display; nothing is changed.
+        $error_token = isset($_GET['adoology_form_error']) ? sanitize_key(wp_unslash($_GET['adoology_form_error'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         $error = preg_match('/^[a-f0-9]{32}$/', $error_token) ? get_transient('adoology_form_error_' . $error_token) : '';
         if ($error_token !== '') {
             delete_transient('adoology_form_error_' . $error_token);

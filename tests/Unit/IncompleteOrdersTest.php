@@ -399,6 +399,8 @@ class IncompleteOrdersTest extends TestCase
     {
         when('wp_salt')->justReturn('test-nonce-secret');
         when('wp_unslash')->returnArg();
+        when('sanitize_text_field')->returnArg();
+        when('get_option')->alias(fn ($name, $default = false) => $default);
 
         $session = new class
         {

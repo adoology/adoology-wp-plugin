@@ -127,13 +127,13 @@ class Events
         $table = Database::events_table();
         $now = gmdate('Y-m-d H:i:s');
         $wpdb->query($wpdb->prepare(
-            "UPDATE {$table} SET status = 'retrying', lease_token = NULL, lease_expires_at = NULL, available_at = %s, updated_at = %s WHERE status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < %s)",
+            "UPDATE %i SET status = 'retrying', lease_token = NULL, lease_expires_at = NULL, available_at = %s, updated_at = %s WHERE status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < %s)", $table,
             $now,
             $now,
             $now
         ));
         $candidate_ids = $wpdb->get_col($wpdb->prepare(
-            "SELECT id FROM {$table} WHERE status IN ('pending','retrying') AND available_at <= %s ORDER BY id ASC LIMIT 25",
+            "SELECT id FROM %i WHERE status IN ('pending','retrying') AND available_at <= %s ORDER BY id ASC LIMIT 25", $table,
             $now
         ));
         if (empty($candidate_ids)) {
@@ -141,14 +141,13 @@ class Events
         }
 
         $lease_token = wp_generate_uuid4();
-        $placeholders = implode(',', array_fill(0, count($candidate_ids), '%d'));
+        $candidate_ids = array_map('intval', $candidate_ids);
         $wpdb->query($wpdb->prepare(
-            // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- dynamic IN() placeholders supplied via array_merge below.
-            "UPDATE {$table} SET status = 'processing', lease_token = %s, lease_expires_at = %s, updated_at = %s WHERE id IN ({$placeholders}) AND status IN ('pending','retrying') AND available_at <= %s",
-            array_merge([$lease_token, gmdate('Y-m-d H:i:s', time() + 5 * MINUTE_IN_SECONDS), $now], array_map('intval', $candidate_ids), [$now])
+            "UPDATE %i SET status = 'processing', lease_token = %s, lease_expires_at = %s, updated_at = %s WHERE id IN (" . implode(',', array_fill(0, count($candidate_ids), '%d')) . ") AND status IN ('pending','retrying') AND available_at <= %s",
+            ...array_merge([$table, $lease_token, gmdate('Y-m-d H:i:s', time() + 5 * MINUTE_IN_SECONDS), $now], $candidate_ids, [$now])
         ));
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT id, event_id, payload, attempts FROM {$table} WHERE lease_token = %s AND status = 'processing' ORDER BY id ASC",
+            "SELECT id, event_id, payload, attempts FROM %i WHERE lease_token = %s AND status = 'processing' ORDER BY id ASC", $table,
             $lease_token
         ), ARRAY_A);
         if (empty($rows)) {
@@ -186,11 +185,9 @@ class Events
                 continue;
             }
 
-            $sent_placeholders = implode(',', array_fill(0, count($ids), '%d'));
             $wpdb->query($wpdb->prepare(
-                // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- dynamic IN() placeholders supplied via array_merge below.
-                "UPDATE {$table} SET status = 'sent', sent_at = %s, updated_at = %s, last_error = NULL, lease_token = NULL, lease_expires_at = NULL WHERE id IN ({$sent_placeholders}) AND status = 'processing' AND lease_token = %s",
-                array_merge([$now, $now], $ids, [$lease_token])
+                "UPDATE %i SET status = 'sent', sent_at = %s, updated_at = %s, last_error = NULL, lease_token = NULL, lease_expires_at = NULL WHERE id IN (" . implode(',', array_fill(0, count($ids), '%d')) . ") AND status = 'processing' AND lease_token = %s",
+                ...array_merge([$table, $now, $now], $ids, [$lease_token])
             ));
         }
 
@@ -207,15 +204,15 @@ class Events
         $table = Database::events_table();
         $retention = min(90, max(1, (int) Options::get('adoology_incomplete_expire_days', 7)));
         $wpdb->query($wpdb->prepare(
-            "DELETE FROM {$table} WHERE status IN ('pending','retrying','processing','failed') AND created_at < %s",
+            "DELETE FROM %i WHERE status IN ('pending','retrying','processing','failed') AND created_at < %s", $table,
             gmdate('Y-m-d H:i:s', time() - $retention * DAY_IN_SECONDS)
         ));
         $wpdb->query($wpdb->prepare(
-            "DELETE FROM {$table} WHERE status = 'sent' AND sent_at < %s",
+            "DELETE FROM %i WHERE status = 'sent' AND sent_at < %s", $table,
             gmdate('Y-m-d H:i:s', time() - 7 * DAY_IN_SECONDS)
         ));
         $wpdb->query($wpdb->prepare(
-            "UPDATE {$table} SET payload = '', updated_at = %s WHERE status = 'failed' AND payload <> '' AND updated_at < %s",
+            "UPDATE %i SET payload = '', updated_at = %s WHERE status = 'failed' AND payload <> '' AND updated_at < %s", $table,
             gmdate('Y-m-d H:i:s'),
             gmdate('Y-m-d H:i:s', time() - 30 * DAY_IN_SECONDS)
         ));

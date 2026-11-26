@@ -50,7 +50,7 @@ Current plugin version: `0.1.10`
 
 | Component | Minimum or requirement |
 | --- | --- |
-| WordPress | 6.0 or newer |
+| WordPress | 6.2 or newer |
 | PHP | 7.4 or newer |
 | WooCommerce | 8.0 or newer |
 | PHP extension | OpenSSL with AES-256-GCM support |
@@ -623,10 +623,11 @@ Use **Adoology > Connection > Disconnect** before deactivation or deletion.
 
 Disconnect performs these actions:
 
-1. Requests deletion of the backend channel connection with an idempotency key.
-2. Backend removes managed WooCommerce webhooks and calls the signed local revocation endpoint.
-3. Plugin synchronously removes locally identifiable Adoology webhooks and API keys as a fallback.
-4. Plugin clears connection state, webhook secret, workspace API key, and legacy artifacts.
+1. Plugin synchronously deletes the Adoology-managed WooCommerce webhooks and API keys, so no further store data is delivered to Adoology.
+2. Plugin keeps short-lived signing material so the backend can still call the signed local revocation endpoint.
+3. Plugin clears connection state, webhook secret, workspace API key, and legacy artifacts.
+
+The plugin does not call the Adoology API on disconnect; the backend connection must be removed in the Adoology workspace. Uninstall performs the same local webhook and API-key cleanup.
 
 Short-lived revocation signing material is retained for safe backend retries and expires after one day.
 
@@ -756,12 +757,8 @@ src/Options.php                        Non-autoloaded plugin option helpers/defa
 src/OrderForm.php                      Shortcode, block rendering, and order creation
 src/Scheduler.php                      Action Scheduler and WP-Cron abstraction
 src/Settings.php                       Admin pages and settings
-src/Webhooks.php                       Dormant legacy local-webhook implementation
-src/RestController.php                 Dormant legacy stock-push endpoint
 tests/                                 PHPUnit unit tests (Brain Monkey)
 ```
-
-`src/Webhooks.php` and `src/RestController.php` are present in the package but are intentionally not registered by `Plugin::init()`. Current production architecture uses backend-managed native WooCommerce webhooks. Do not register the dormant classes unless the backend integration contract is deliberately changed and tested.
 
 ### Installation and tests
 

@@ -28,9 +28,33 @@ function adoology_uninstall_site()
     if (class_exists(Connection::class)) {
         Connection::delete_managed_woocommerce_credentials();
     } else {
+        $webhook_table = $wpdb->prefix . 'wc_webhooks';
+        $webhook_names = [];
+        foreach (['Adoology ', 'Adoology: '] as $adoology_prefix) {
+            foreach (['customer', 'order', 'product'] as $adoology_resource) {
+                foreach (['created', 'deleted', 'updated'] as $adoology_event) {
+                    $webhook_names[] = $adoology_prefix . $adoology_resource . '.' . $adoology_event;
+                }
+            }
+        }
+        $webhooks = $wpdb->get_results($wpdb->prepare(
+            'SELECT webhook_id, name FROM %i WHERE name LIKE %s', $webhook_table,
+            $wpdb->esc_like('Adoology') . '%'
+        ), ARRAY_A);
+        foreach ((array) $webhooks as $webhook) {
+            if (in_array((string) $webhook['name'], $webhook_names, true)) {
+                $wpdb->delete($webhook_table, ['webhook_id' => (int) $webhook['webhook_id'], 'name' => $webhook['name']], ['%d', '%s']);
+                wp_cache_delete((int) $webhook['webhook_id'], 'webhooks');
+            }
+        }
+        // WooCommerce caches webhook IDs; rows removed without its API must leave that cache.
+        foreach (['', '_status_active', '_status_paused', '_status_disabled'] as $adoology_suffix) {
+            delete_transient('woocommerce_webhook_ids' . $adoology_suffix);
+        }
+
         $key_table = $wpdb->prefix . 'woocommerce_api_keys';
         $keys = $wpdb->get_results($wpdb->prepare(
-            "SELECT key_id, description FROM {$key_table} WHERE description = %s OR description LIKE %s OR description LIKE %s",
+            'SELECT key_id, description FROM %i WHERE description = %s OR description LIKE %s OR description LIKE %s', $key_table,
             'Adoology Connector',
             $wpdb->esc_like('Adoology Connector ') . '%',
             $wpdb->esc_like('Adoology - API (') . '%'
@@ -115,8 +139,8 @@ function adoology_uninstall_site()
         }
     }
 
-    $wpdb->query("DROP TABLE IF EXISTS {$wpdb->prefix}adoology_events");
-    $wpdb->query("DROP TABLE IF EXISTS {$wpdb->prefix}adoology_incomplete_orders");
+    $wpdb->query($wpdb->prepare('DROP TABLE IF EXISTS %i', $wpdb->prefix . 'adoology_events'));
+    $wpdb->query($wpdb->prepare('DROP TABLE IF EXISTS %i', $wpdb->prefix . 'adoology_incomplete_orders'));
 }
 
 if (is_multisite()) {
